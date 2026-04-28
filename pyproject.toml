@@ -1,0 +1,19 @@
+[project]
+name = "fast-eq-windows"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Andrew Cook", email = "awcook97@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "dearpygui>=2.3",
+]
+
+[project.scripts]
+fast-eq-windows = "fast_eq_windows:main"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
