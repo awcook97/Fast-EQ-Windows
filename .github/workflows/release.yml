@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Wheel (platform-independent) ──────────────────────────────────────────
+  build-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheel
+          path: dist/
+
+  # ── Standalone binaries (per platform) ────────────────────────────────────
+  build-binary:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            bin: fast-eq-windows
+            pyinstaller_flags: --onefile
+          - os: windows-latest
+            label: windows-x86_64
+            bin: fast-eq-windows.exe
+            # --windowed suppresses the console on Windows
+            pyinstaller_flags: --onefile --windowed
+          - os: macos-latest
+            label: macos-arm64
+            bin: fast-eq-windows
+            pyinstaller_flags: --onefile
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies (including PyInstaller)
+        run: uv sync --group dev
+
+      - name: Build binary
+        run: >
+          uv run pyinstaller
+          ${{ matrix.pyinstaller_flags }}
+          --collect-all dearpygui
+          --hidden-import dearpygui.dearpygui
+          --name fast-eq-windows
+          build_launcher.py
+
+      - name: Rename binary with platform suffix
+        shell: bash
+        run: |
+          mkdir -p release
+          cp dist/${{ matrix.bin }} release/fast-eq-windows-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.label }}
+          path: release/
+
+  # ── GitHub Release ─────────────────────────────────────────────────────────
+  release:
+    needs: [build-wheel, build-binary]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/*.whl
+            artifacts/*.tar.gz
+            artifacts/fast-eq-windows-linux-x86_64
+            artifacts/fast-eq-windows-windows-x86_64.exe
+            artifacts/fast-eq-windows-macos-arm64
