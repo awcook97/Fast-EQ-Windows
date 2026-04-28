@@ -1,3 +1,4 @@
+import math
 import queue
 import threading
 import time
@@ -117,6 +118,10 @@ class App:
         finally:
             self._scanning = False
 
+    @staticmethod
+    def _cell_cols(count: int, target_rows: int) -> int:
+        return max(1, math.ceil(count / target_rows))
+
     def _rebuild_table(self) -> None:
         dpg.delete_item(_TABLE_CONTAINER, children_only=True)
 
@@ -136,6 +141,16 @@ class App:
         for char in self._characters:
             grid[char.server][char.eq_class].append(char)
 
+        # target_rows derived from the busiest class so layout scales with data
+        max_count = max((len(grid[s][cls]) for s in servers for cls in classes), default=1)
+        target_rows = max(1, math.ceil(math.sqrt(max_count)))
+
+        # Weight each outer column by the most sub-columns it'll ever need
+        class_weight = {
+            cls: max(self._cell_cols(len(grid[s][cls]), target_rows) for s in servers)
+            for cls in classes
+        }
+
         with dpg.table(
             parent=_TABLE_CONTAINER,
             header_row=True,
@@ -150,31 +165,61 @@ class App:
         ):
             dpg.add_table_column(label="Server", width_fixed=True, init_width_or_weight=130)
             for cls in classes:
-                dpg.add_table_column(label=cls, width_stretch=True, init_width_or_weight=1.0)
+                dpg.add_table_column(
+                    label=cls,
+                    width_stretch=True,
+                    init_width_or_weight=float(class_weight[cls]),
+                )
 
             for server in servers:
                 with dpg.table_row():
                     dpg.add_text(server)
                     for cls in classes:
                         cell_chars = grid[server][cls]
-                        with dpg.group():
-                            for char in cell_chars:
-                                tooltip = (
-                                    f"{char.name}.{char.server}\n"
-                                    f"Lvl {char.level} {char.eq_class}\n"
-                                    f"{char.zone}"
-                                    + (f"  ({char.instance})" if char.instance else "")
+                        if not cell_chars:
+                            dpg.add_text("")
+                            continue
+
+                        ncols = self._cell_cols(len(cell_chars), target_rows)
+                        chunks = [cell_chars[i:i+ncols] for i in range(0, len(cell_chars), ncols)]
+
+                        with dpg.table(
+                            header_row=False,
+                            policy=dpg.mvTable_SizingFixedFit,
+                            borders_innerH=False,
+                            borders_outerH=False,
+                            borders_innerV=False,
+                            borders_outerV=False,
+                            pad_outerX=False,
+                        ):
+                            for _ in range(ncols):
+                                dpg.add_table_column(
+                                    width_fixed=True,
+                                    init_width_or_weight=_BUTTON_WIDTH + 4,
                                 )
-                                btn = dpg.add_button(
-                                    label=char.name,
-                                    callback=lambda s, a, u: focus_window(u),
-                                    user_data=char.window_id,
-                                    width=_BUTTON_WIDTH,
-                                    height=_BUTTON_HEIGHT,
-                                )
-                                dpg.bind_item_theme(btn, self._get_class_theme(char.eq_class))
-                                with dpg.tooltip(btn):
-                                    dpg.add_text(tooltip)
+
+                            for chunk in chunks:
+                                with dpg.table_row():
+                                    for char in chunk:
+                                        tooltip = (
+                                            f"{char.name}.{char.server}\n"
+                                            f"Lvl {char.level} {char.eq_class}\n"
+                                            f"{char.zone}"
+                                            + (f"  ({char.instance})" if char.instance else "")
+                                        )
+                                        btn = dpg.add_button(
+                                            label=char.name,
+                                            callback=lambda s, a, u: focus_window(u),
+                                            user_data=char.window_id,
+                                            width=_BUTTON_WIDTH,
+                                            height=_BUTTON_HEIGHT,
+                                        )
+                                        dpg.bind_item_theme(btn, self._get_class_theme(char.eq_class))
+                                        with dpg.tooltip(btn):
+                                            dpg.add_text(tooltip)
+                                    # pad incomplete last row
+                                    for _ in range(ncols - len(chunk)):
+                                        dpg.add_text("")
 
 
 def main() -> None:
