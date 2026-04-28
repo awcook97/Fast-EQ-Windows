@@ -96,8 +96,13 @@ def scan_eq_windows() -> list[EQChar]:
     if not pids:
         return []
 
+    # Each thread opens 2 xdotool X connections (search + getwindowname).
+    # X11 hard-caps total clients at 256; 87 Wine processes already consume ~87.
+    # Cap workers so we never spike more than ~16 concurrent X connections from here.
+    _MAX_WORKERS = 16
+
     chars: list[EQChar] = []
-    with ThreadPoolExecutor(max_workers=len(pids)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(pids), _MAX_WORKERS)) as pool:
         futures = {pool.submit(_scan_one_pid, pid): pid for pid in pids}
         for future in as_completed(futures):
             char = future.result()
