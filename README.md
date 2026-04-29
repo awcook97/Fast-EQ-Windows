@@ -12,12 +12,22 @@ A lightweight EverQuest window manager for Linux multiboxers. Scans running EQ c
 
 - Auto-detects all running EQ clients via `xdotool` + Wine process scanning
 - Grid layout: **rows = servers**, **columns = classes** — only what's actually running
-- Per-class color coding with high-contrast text
+- Buttons sorted alphabetically by character name within each class
+- Up to 6 characters per column before wrapping to a second column
+- Per-class color coding using World of Warcraft class colors
 - One-click window focus (raises + activates the target client)
+- **Search bar** — filter characters by name in real time; status shows "N of M characters"
+- **Anonymous mode** with four levels:
+  - **Off** — real names and classes shown
+  - **Anon: Names** — character names replaced with random pronounceable names
+  - **Anon: Names+Classes** — names and classes both randomized
+  - **Oops: Only Paladins** — everyone shows as Paladin
+  - **Full Anon: Norrath** — names, classes, and server all randomized; all characters merged into one "Norrath" server
 - Auto-refresh on a configurable interval (default: 1 hour)
-- Threaded scanning — all clients polled in parallel, UI never blocks
+- **Streaming scan** — characters pop into the grid as they're found; UI never blocks
+- **Zoning retry** — characters mid-zone (non-EQ window title) are retried every 2 s for up to 30 s in the background, then added to the grid when they finish loading
+- Window auto-sizes to fit content — starts small and grows as characters populate
 - Customizable theme and fonts via built-in editor
-- Debug output off by default in release builds; full logging available in dev mode
 
 ---
 
@@ -86,8 +96,10 @@ uv run fast-eq-windows
 | **Refresh** button | Re-scan for EQ windows immediately |
 | **Auto-refresh** checkbox | Toggle periodic background refresh |
 | **Interval (s)** field | How often to auto-refresh (min 60 s) |
+| **Anon** dropdown | Set anonymization level (Off / Names / Names+Classes / Only Paladins / Full Norrath) |
+| **Search** field | Filter displayed characters by name |
 | Click any character button | Raise + focus that EQ window |
-| Hover over a button | Show character details (level, zone, instance) |
+| Hover over a button | Show character details (level, class, zone, instance) |
 | **Theme → Configure** | Live color theme editor with save/load |
 | **Fonts → Font Settings** | Font picker with size/scale controls |
 
@@ -107,24 +119,26 @@ Example: `Roubun.luclin (Lvl:115 Enchanter) Modest Guild Hall 14065`
 
 ## Class colors
 
+Colors match World of Warcraft class colors for easy recognition at a glance.
+
 | Class | Color |
 |-------|-------|
-| Warrior | Saddle Brown |
-| Cleric | Silver |
-| Paladin | Gold |
-| Ranger | Forest Green |
-| Shadow Knight | Dark Maroon |
-| Druid | Olive |
-| Monk | Burnt Orange |
-| Bard | Purple |
-| Rogue | Dark Slate |
-| Shaman | Teal |
-| Necromancer | Dark Red |
-| Wizard | Royal Blue |
-| Magician | Sky Blue |
-| Enchanter | Indigo |
-| Beastlord | Sienna |
-| Berserker | Crimson |
+| Warrior | Gold |
+| Cleric | White |
+| Paladin | Pink |
+| Ranger | Hunter Green |
+| Shadow Knight | Death Knight Red |
+| Druid | Orange |
+| Monk | Jade |
+| Bard | Evoker Teal |
+| Rogue | Yellow |
+| Shaman | Blue |
+| Necromancer | Warlock Purple |
+| Wizard | Mage Cyan |
+| Magician | Light Blue |
+| Enchanter | Demon Hunter Purple |
+| Beastlord | Orange |
+| Berserker | Red |
 
 Text color is automatically chosen for maximum contrast against the button background.
 
@@ -166,10 +180,12 @@ GitHub Actions will build binaries for Linux, Windows, and macOS and publish the
 
 1. `pgrep -f eqgame.exe` finds all Wine processes running EQ
 2. Each PID's `/proc/<pid>/cmdline` is checked for `patchme` to skip Wine helper processes
-3. `xdotool search --pid <pid> --onlyvisible` finds the X window for each game process
-4. Window titles are parsed with a regex to extract name, server, level, class, zone, and instance
-5. All PIDs are scanned in parallel via `ThreadPoolExecutor`
-6. Clicking a button calls `xdotool windowactivate` + `windowraise` + `windowfocus`
+3. All PIDs are scanned in parallel via `ThreadPoolExecutor` (capped at 16 concurrent X connections)
+4. For each PID: `xdotool search --pid <pid> --onlyvisible` finds the X window
+5. Window titles are parsed with a regex to extract name, server, level, class, zone, and instance
+6. Characters appear in the UI as each PID resolves — no waiting for all scans to finish
+7. PIDs whose window title doesn't match (character is mid-zone) are retried every 2 s for up to 30 s in a background thread, then added when ready
+8. Clicking a button calls `xdotool windowactivate` + `windowraise` + `windowfocus`
 
 ---
 

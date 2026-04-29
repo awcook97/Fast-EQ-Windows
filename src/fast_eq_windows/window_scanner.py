@@ -1,7 +1,12 @@
 import re
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+
+_ZONE_TIMEOUT = 30.0
+_ZONE_POLL = 2.0
+MAX_WORKERS = 16  # X11 hard-caps at 256 clients; Wine uses ~87, leave headroom
 
 _TITLE_RE = re.compile(
     r'^(\w+)\.(\w+)\s+\(Lvl:(\d+)\s+(.*?)\)\s+(.+?)(?:\s+(\d+))?\s*$'
@@ -36,7 +41,7 @@ def _run(args: list[str], timeout: int = 5) -> str:
         return ""
 
 
-def _get_eqgame_pids() -> list[int]:
+def get_eqgame_pids() -> list[int]:
     """
     Find PIDs of actual EQ game processes.
     eqgame.exe has two Wine processes per instance; the real one has 'patchme'
@@ -66,7 +71,8 @@ def _get_eqgame_pids() -> list[int]:
     return game_pids
 
 
-def _scan_one_pid(pid: int) -> EQChar | None:
+def scan_pid(pid: int) -> EQChar | None:
+    """Single fast attempt — no retry. Returns None if title doesn't match."""
     wids_raw = _run(["xdotool", "search", "--pid", str(pid), "--onlyvisible"])
     print(f"[scanner] pid {pid} -> wids: {wids_raw.strip()!r}")
 
@@ -91,24 +97,54 @@ def _scan_one_pid(pid: int) -> EQChar | None:
     return None
 
 
+def scan_pid_retry(pid: int) -> EQChar | None:
+    """Poll every _ZONE_POLL seconds until title matches or _ZONE_TIMEOUT expires."""
+    deadline = time.monotonic() + _ZONE_TIMEOUT
+    last_title = ""
+    attempt = 0
+
+    while True:
+        attempt += 1
+        wids_raw = _run(["xdotool", "search", "--pid", str(pid), "--onlyvisible"])
+
+        for line in wids_raw.splitlines():
+            wid_str = line.strip()
+            if not wid_str:
+                continue
+            try:
+                wid = int(wid_str)
+            except ValueError:
+                continue
+            if wid == 0:
+                continue
+
+            title = _run(["xdotool", "getwindowname", str(wid)], timeout=2).strip()
+            char = _parse_title(title, wid)
+            if char:
+                print(f"[scanner] pid {pid} recovered after {attempt} attempts: {char.name}.{char.server}")
+                return char
+            last_title = title
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(f"[scanner] pid {pid} timed out after {attempt} attempts (last: {last_title!r})")
+            return None
+        wait = min(_ZONE_POLL, remaining)
+        print(f"[scanner] pid {pid} zoning, retry in {wait:.1f}s (last: {last_title!r})")
+        time.sleep(wait)
+
+
 def scan_eq_windows() -> list[EQChar]:
-    pids = _get_eqgame_pids()
+    pids = get_eqgame_pids()
     if not pids:
         return []
-
-    # Each thread opens 2 xdotool X connections (search + getwindowname).
-    # X11 hard-caps total clients at 256; 87 Wine processes already consume ~87.
-    # Cap workers so we never spike more than ~16 concurrent X connections from here.
-    _MAX_WORKERS = 16
-
     chars: list[EQChar] = []
-    with ThreadPoolExecutor(max_workers=min(len(pids), _MAX_WORKERS)) as pool:
-        futures = {pool.submit(_scan_one_pid, pid): pid for pid in pids}
+    with ThreadPoolExecutor(max_workers=min(len(pids), MAX_WORKERS)) as pool:
+        futures = {pool.submit(scan_pid, pid): pid for pid in pids}
         for future in as_completed(futures):
             char = future.result()
             if char:
                 chars.append(char)
-
     return chars
 
 

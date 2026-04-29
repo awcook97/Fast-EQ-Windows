@@ -1,23 +1,23 @@
 import dearpygui.dearpygui as dpg
 
-# (bg_rgba, text_rgba) — text chosen by luminance rule: 0.299R+0.587G+0.114B > 128 → black, else white
+# (bg_rgba, text_rgba) — WoW class colors; text chosen for contrast
 CLASS_COLORS: dict[str, tuple[tuple[int, int, int, int], tuple[int, int, int, int]]] = {
-    "Warrior":      ((160, 82,  45,  255), (255, 255, 255, 255)),
-    "Cleric":       ((192, 192, 192, 255), (0,   0,   0,   255)),
-    "Paladin":      ((218, 165, 32,  255), (0,   0,   0,   255)),
-    "Ranger":       ((34,  139, 34,  255), (255, 255, 255, 255)),
-    "Shadow Knight":((100, 0,   0,   255), (255, 255, 255, 255)),
-    "Druid":        ((107, 142, 35,  255), (255, 255, 255, 255)),
-    "Monk":         ((205, 92,  0,   255), (255, 255, 255, 255)),
-    "Bard":         ((148, 0,   211, 255), (255, 255, 255, 255)),
-    "Rogue":        ((47,  79,  79,  255), (255, 255, 255, 255)),
-    "Shaman":       ((0,   128, 128, 255), (255, 255, 255, 255)),
-    "Necromancer":  ((88,  0,   0,   255), (255, 255, 255, 255)),
-    "Wizard":       ((65,  105, 225, 255), (255, 255, 255, 255)),
-    "Magician":     ((0,   150, 210, 255), (255, 255, 255, 255)),
-    "Enchanter":    ((75,  0,   130, 255), (255, 255, 255, 255)),
-    "Beastlord":    ((188, 100, 0,   255), (255, 255, 255, 255)),
-    "Berserker":    ((178, 34,  34,  255), (255, 255, 255, 255)),
+    "Warrior":      ((198, 155, 58,  255), (0,   0,   0,   255)),  # WoW Warrior gold
+    "Cleric":       ((255, 255, 255, 255), (0,   0,   0,   255)),  # WoW Priest white
+    "Paladin":      ((244, 140, 186, 255), (0,   0,   0,   255)),  # WoW Paladin pink
+    "Ranger":       ((170, 211, 114, 255), (0,   0,   0,   255)),  # WoW Hunter green
+    "Shadow Knight":((196, 30,  58,  255), (255, 255, 255, 255)),  # WoW Death Knight red
+    "Druid":        ((255, 124, 10,  255), (0,   0,   0,   255)),  # WoW Druid orange
+    "Monk":         ((0,   255, 152, 255), (0,   0,   0,   255)),  # WoW Monk jade
+    "Bard":         ((51,  147, 127, 255), (255, 255, 255, 255)),  # WoW Evoker teal
+    "Rogue":        ((255, 244, 104, 255), (0,   0,   0,   255)),  # WoW Rogue yellow
+    "Shaman":       ((0,   112, 221, 255), (255, 255, 255, 255)),  # WoW Shaman blue
+    "Necromancer":  ((135, 136, 238, 255), (0,   0,   0,   255)),  # WoW Warlock purple
+    "Wizard":       ((63,  199, 235, 255), (0,   0,   0,   255)),  # WoW Mage cyan
+    "Magician":     ((105, 204, 240, 255), (0,   0,   0,   255)),  # WoW Mage lighter
+    "Enchanter":    ((163, 48,  201, 255), (255, 255, 255, 255)),  # WoW Demon Hunter purple
+    "Beastlord":    ((255, 103, 32,  255), (0,   0,   0,   255)),  # WoW Hunter orange
+    "Berserker":    ((212, 32,  32,  255), (255, 255, 255, 255)),  # WoW Warrior red variant
 }
 
 _DEFAULT_BG: tuple[int, int, int, int] = (80, 80, 80, 255)

@@ -1,11 +1,15 @@
 import math
 import queue
+import random
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import dearpygui.dearpygui as dpg
 
 from .class_colors import build_class_theme
-from .window_scanner import EQChar, scan_eq_windows, focus_window
+from .window_scanner import (
+    EQChar, get_eqgame_pids, scan_pid, scan_pid_retry, MAX_WORKERS, focus_window,
+)
 from .DearPyGui_EditThemePlugin.EditThemePlugin import EditThemePlugin
 from .DearPyGui_EditThemePlugin.ChooseFontsPlugin import ChooseFontsPlugin
 
@@ -13,6 +17,32 @@ _BUTTON_WIDTH = 130
 _BUTTON_HEIGHT = 38
 _TABLE_CONTAINER = "eq_table_container"
 _STATUS_TEXT = "eq_status_text"
+
+_EQ_CLASSES = [
+    "Warrior", "Cleric", "Paladin", "Ranger", "Shadow Knight", "Druid",
+    "Monk", "Bard", "Rogue", "Shaman", "Necromancer", "Wizard",
+    "Magician", "Enchanter", "Beastlord", "Berserker",
+]
+_ANON_OPTS = ["Off", "Anon: Names", "Anon: Names+Classes", "Oops: Only Paladins", "Full Anon: Norrath"]
+
+_CHROME_H = 22 + 22 + 32 + 6   # menu bar + spacer + toolbar + separator
+_TABLE_HEADER_H = 26
+_BUTTON_ROW_H = _BUTTON_HEIGHT + 4
+
+_CONSONANTS = "bcdfghjklmnprstvwxz"
+_VOWELS = "aeiou"
+
+
+def _anon_name(window_id: int) -> str:
+    rng = random.Random(window_id)
+    length = rng.randint(5, 9)
+    return "".join(
+        rng.choice(_CONSONANTS if i % 2 == 0 else _VOWELS) for i in range(length)
+    ).capitalize()
+
+
+def _anon_class(window_id: int) -> str:
+    return random.Random(window_id ^ 0xDEAD).choice(_EQ_CLASSES)
 
 
 class App:
@@ -24,10 +54,12 @@ class App:
         self._last_refresh = 0.0
         self._scanning = False
         self._result_queue: queue.Queue[list[EQChar]] = queue.Queue()
+        self._anon = "Off"
+        self._search = ""
 
     def run(self) -> None:
         dpg.create_context()
-        dpg.create_viewport(title="Fast EQ Windows", width=1200, height=800, min_width=500, min_height=300)
+        dpg.create_viewport(title="Fast EQ Windows", width=600, height=300, min_width=500, min_height=300)
 
         self._setup_ui()
 
@@ -38,15 +70,16 @@ class App:
         self._refresh()
 
         while dpg.is_dearpygui_running():
-            # Apply completed scan results on the main thread
-            try:
-                chars = self._result_queue.get_nowait()
-                self._characters = chars
+            # Drain all pending scan results; only rebuild once with the latest snapshot
+            latest: list[EQChar] | None = None
+            while True:
+                try:
+                    latest = self._result_queue.get_nowait()
+                except queue.Empty:
+                    break
+            if latest is not None:
+                self._characters = latest
                 self._rebuild_table()
-                n = len(chars)
-                dpg.set_value(_STATUS_TEXT, f"   Found {n} character{'s' if n != 1 else ''}")
-            except queue.Empty:
-                pass
 
             now = time.time()
             if self._auto_refresh and not self._scanning and (now - self._last_refresh >= self._refresh_interval):
@@ -91,9 +124,31 @@ class App:
                     step=0,
                     callback=lambda s, v: setattr(self, "_refresh_interval", float(v)),
                 )
+                dpg.add_text("  Anon:")
+                dpg.add_combo(
+                    tag="eq_anon",
+                    items=_ANON_OPTS,
+                    default_value="Off",
+                    width=200,
+                    callback=self._on_anon_change,
+                )
+                dpg.add_text("  Search:")
+                dpg.add_input_text(
+                    tag="eq_search",
+                    width=160,
+                    hint="filter by name",
+                    callback=self._on_search_change,
+                )
                 dpg.add_text("", tag=_STATUS_TEXT)
 
             dpg.add_separator()
+            with dpg.group(horizontal=True):
+                dpg.add_text("Always on top?")
+                dpg.add_checkbox(
+                    tag="eq_always_on_top",
+                    default_value=False,
+                    callback=lambda s, v: dpg.set_viewport_always_top(v),
+                )
 
             with dpg.child_window(tag=_TABLE_CONTAINER, autosize_x=True, autosize_y=True, no_scrollbar=False):
                 dpg.add_text("Scanning...")
@@ -113,10 +168,71 @@ class App:
 
     def _scan_worker(self) -> None:
         try:
-            chars = scan_eq_windows()
-            self._result_queue.put(chars)
+            pids = get_eqgame_pids()
+            if not pids:
+                self._result_queue.put([])
+                return
+
+            found: list[EQChar] = []
+            unresolved: list[int] = []
+
+            with ThreadPoolExecutor(max_workers=min(len(pids), MAX_WORKERS)) as pool:
+                futures = {pool.submit(scan_pid, pid): pid for pid in pids}
+                for future in as_completed(futures):
+                    char = future.result()
+                    if char:
+                        found.append(char)
+                        self._result_queue.put(list(found))
+                    else:
+                        unresolved.append(futures[future])
+
+            # If nothing was found at all, push an empty list so UI updates
+            if not found:
+                self._result_queue.put([])
+
+            if unresolved:
+                print(f"[scanner] {len(unresolved)} PIDs unresolved (zoning?), retrying in background")
+                threading.Thread(
+                    target=self._retry_zoning,
+                    args=(list(found), unresolved),
+                    daemon=True,
+                ).start()
         finally:
             self._scanning = False
+
+    def _retry_zoning(self, found: list[EQChar], unresolved: list[int]) -> None:
+        with ThreadPoolExecutor(max_workers=min(len(unresolved), MAX_WORKERS)) as pool:
+            futures = {pool.submit(scan_pid_retry, pid): pid for pid in unresolved}
+            for future in as_completed(futures):
+                char = future.result()
+                if char:
+                    found.append(char)
+                    self._result_queue.put(list(found))
+
+    def _on_anon_change(self, sender, app_data, user_data) -> None:
+        self._anon = app_data
+        self._rebuild_table()
+
+    def _on_search_change(self, sender, app_data, user_data) -> None:
+        self._search = app_data.strip().lower()
+        self._rebuild_table()
+
+    def _display_name(self, char: EQChar) -> str:
+        if self._anon != "Off":
+            return _anon_name(char.window_id)
+        return char.name
+
+    def _display_class(self, char: EQChar) -> str:
+        if self._anon == "Oops: Only Paladins":
+            return "Paladin"
+        if self._anon in ("Anon: Names+Classes", "Full Anon: Norrath"):
+            return _anon_class(char.window_id)
+        return char.eq_class
+
+    def _display_server(self, char: EQChar) -> str:
+        if self._anon == "Full Anon: Norrath":
+            return "Norrath"
+        return char.server
 
     @staticmethod
     def _cell_cols(count: int, target_rows: int) -> int:
@@ -125,27 +241,45 @@ class App:
     def _rebuild_table(self) -> None:
         dpg.delete_item(_TABLE_CONTAINER, children_only=True)
 
-        if not self._characters:
-            dpg.add_text(
-                "No EverQuest windows found. Make sure EQ clients are running.",
-                parent=_TABLE_CONTAINER,
+        # Apply search filter against display names
+        chars = self._characters
+        if self._search:
+            chars = [c for c in chars if self._search in self._display_name(c).lower()]
+
+        n_total = len(self._characters)
+        n_shown = len(chars)
+
+        if not chars:
+            msg = (
+                f"No results for '{self._search}'." if self._search and self._characters
+                else "No EverQuest windows found. Make sure EQ clients are running."
             )
+            dpg.add_text(msg, parent=_TABLE_CONTAINER)
+            dpg.set_value(_STATUS_TEXT, f"   Found {n_total} character{'s' if n_total != 1 else ''}")
+            dpg.set_viewport_height(300)
             return
 
-        servers = sorted({c.server for c in self._characters})
-        classes = sorted({c.eq_class for c in self._characters})
+        if self._search:
+            dpg.set_value(_STATUS_TEXT, f"   {n_shown} of {n_total} character{'s' if n_total != 1 else ''}")
+        else:
+            dpg.set_value(_STATUS_TEXT, f"   Found {n_total} character{'s' if n_total != 1 else ''}")
+
+        servers = sorted({self._display_server(c) for c in chars})
+        classes = sorted({self._display_class(c) for c in chars})
 
         grid: dict[str, dict[str, list[EQChar]]] = {
             s: {cls: [] for cls in classes} for s in servers
         }
-        for char in self._characters:
-            grid[char.server][char.eq_class].append(char)
+        for char in chars:
+            grid[self._display_server(char)][self._display_class(char)].append(char)
 
-        # target_rows derived from the busiest class so layout scales with data
-        max_count = max((len(grid[s][cls]) for s in servers for cls in classes), default=1)
-        target_rows = max(1, math.ceil(math.sqrt(max_count)))
+        # Sort each cell alphabetically by display name
+        for s in servers:
+            for cls in classes:
+                grid[s][cls].sort(key=lambda c: self._display_name(c).lower())
 
-        # Weight each outer column by the most sub-columns it'll ever need
+        target_rows = 6
+
         class_weight = {
             cls: max(self._cell_cols(len(grid[s][cls]), target_rows) for s in servers)
             for cls in classes
@@ -201,25 +335,66 @@ class App:
                             for chunk in chunks:
                                 with dpg.table_row():
                                     for char in chunk:
-                                        tooltip = (
-                                            f"{char.name}.{char.server}\n"
-                                            f"Lvl {char.level} {char.eq_class}\n"
-                                            f"{char.zone}"
-                                            + (f"  ({char.instance})" if char.instance else "")
-                                        )
+                                        disp_name = self._display_name(char)
+                                        disp_class = self._display_class(char)
+                                        disp_server = self._display_server(char)
+                                        if self._anon == "Off":
+                                            tooltip = (
+                                                f"{char.name}.{char.server}\n"
+                                                f"Lvl {char.level} {char.eq_class}\n"
+                                                f"{char.zone}"
+                                                + (f"  ({char.instance})" if char.instance else "")
+                                            )
+                                        else:
+                                            tooltip = (
+                                                f"{disp_name}.{disp_server}\n"
+                                                f"Lvl {char.level} {disp_class}\n"
+                                                f"{char.zone}"
+                                                + (f"  ({char.instance})" if char.instance else "")
+                                            )
                                         btn = dpg.add_button(
-                                            label=char.name,
+                                            label=disp_name,
                                             callback=lambda s, a, u: focus_window(u),
                                             user_data=char.window_id,
                                             width=_BUTTON_WIDTH,
                                             height=_BUTTON_HEIGHT,
                                         )
-                                        dpg.bind_item_theme(btn, self._get_class_theme(char.eq_class))
+                                        dpg.bind_item_theme(btn, self._get_class_theme(disp_class))
                                         with dpg.tooltip(btn):
                                             dpg.add_text(tooltip)
-                                    # pad incomplete last row
                                     for _ in range(ncols - len(chunk)):
                                         dpg.add_text("")
+
+        self._fit_viewport(servers, classes, class_weight, grid, target_rows)
+
+    def _fit_viewport(
+        self,
+        servers: list[str],
+        classes: list[str],
+        class_weight: dict[str, int],
+        grid: dict[str, dict[str, list[EQChar]]],
+        target_rows: int,
+    ) -> None:
+        # Width: fixed server col + each class col's natural pixel width + borders/padding
+        class_px = sum(class_weight[cls] * (_BUTTON_WIDTH + 4) + 4 for cls in classes)
+        vp_width = 130 + class_px + 30
+
+        # Height: toolbar chrome + table header + per-server rows
+        row_h_total = 0
+        for s in servers:
+            max_btn_rows = max(
+                (
+                    math.ceil(len(grid[s][cls]) / self._cell_cols(len(grid[s][cls]), target_rows))
+                    for cls in classes if grid[s][cls]
+                ),
+                default=1,
+            )
+            row_h_total += max_btn_rows * _BUTTON_ROW_H + 8
+
+        vp_height = _CHROME_H + _TABLE_HEADER_H + row_h_total + 16
+
+        dpg.set_viewport_width(max(500, vp_width))
+        dpg.set_viewport_height(max(300, vp_height))
 
 
 def main() -> None:
