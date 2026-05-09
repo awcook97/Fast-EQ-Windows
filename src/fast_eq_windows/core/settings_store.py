@@ -1,3 +1,10 @@
+"""Persistent JSON-backed settings with per-plugin namespaces.
+
+The on-disk layout is `{"enabled": [...], "settings": {<plugin>: {...}}}`.
+Writes are debounced through the host's `TickScheduler` so a burst of
+`set()` calls collapses into a single disk write.  Reads are O(1) against
+the in-memory cache.
+"""
 from __future__ import annotations
 
 import json

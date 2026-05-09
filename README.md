@@ -60,8 +60,12 @@ first launch. Use **Plugins → Reload** after editing `plugins.json` or plugin
 source files. Use **Plugins → Open plugins folder** or **Plugins → Open settings
 folder** from the menu for quick access.
 
-See [docs/PLUGINS.md](docs/PLUGINS.md) for the full lifecycle, API contract,
-events, threading rules, and settings format.
+See [docs/](docs/README.md) for the full documentation set:
+
+- [docs/PLUGINS.md](docs/PLUGINS.md) — plugin API, lifecycle, AppContext, button surface
+- [docs/EVENTS.md](docs/EVENTS.md) — built-in events and ordering guarantees
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map, runtime data flow, threading
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — local setup, smoke testing, packaging
 
 Security note: plugins are normal Python code with full access to your user
 account. Only install plugins you trust.

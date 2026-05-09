@@ -1,3 +1,9 @@
+"""Lookup index for live `CharacterButton` instances.
+
+The host owns registration; plugins are read-only consumers.  Lifecycle
+events (`button.created` / `button.destroyed`) are mirrored onto the
+EventBus so plugins can react without polling.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional

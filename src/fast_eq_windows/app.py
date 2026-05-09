@@ -74,8 +74,8 @@ class App:
         self._button_registry = ButtonRegistry(events=self._events)
         self._scheduler = TickScheduler()
         self._settings = SettingsStore(path=user_config_path(), scheduler=self._scheduler)
-        self._plugins_menu_id: int | None = None
-        self._plugin_menu_item_ids: list[int] = []
+        self._plugins_menu_id: int | str | None = None
+        self._plugin_menu_item_ids: list[int | str] = []
         self._plugin_host = PluginHost(
             plugins_dir=user_plugins_dir(),
             ctx_factory=self._make_plugin_context,
@@ -173,16 +173,20 @@ class App:
             settings=self._settings.namespace(plugin.name),
         )
 
-    def _register_plugin_menu(self, label: str, callback) -> int:
-        """Add a menu item under the Plugins menu.  Returns the DPG item id."""
+    def _register_plugin_menu(self, label: str, callback) -> int | str:
+        """Add a menu item under the Plugins menu.  Returns the DPG item id.
+
+        DearPyGui's `add_*` functions return either an int handle or a string
+        tag, so we accept and forward both.  The id is recorded so
+        `_clear_plugin_menu_items` can tear it down on reload.
+        """
         if self._plugins_menu_id is None:
-            print(f"[app] _register_plugin_menu called before menu was created")
+            print("[app] _register_plugin_menu called before menu was created")
             return 0
         item = dpg.add_menu_item(label=label, callback=callback, parent=self._plugins_menu_id)
-        item_id = int(item) if isinstance(item, int) else 0
-        if item_id:
-            self._plugin_menu_item_ids.append(item_id)
-        return item_id
+        if item:
+            self._plugin_menu_item_ids.append(item)
+        return item
 
     def _clear_plugin_menu_items(self) -> None:
         """Remove menu items registered by plugins during a previous load."""

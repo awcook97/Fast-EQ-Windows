@@ -1,3 +1,11 @@
+"""PluginHost: discovery, dependency-ordered loading, and dispatch.
+
+Discovery imports each `<plugin_dir>/<name>/plugin.py` under a unique module
+name so two plugins can't collide in `sys.modules`.  Loading is topologically
+sorted by `Plugin.requires`, with cycles and missing deps demoted to a
+best-effort tail load.  Every dispatch is wrapped in try/except per plugin so
+a single broken hook can't take down the host.
+"""
 from __future__ import annotations
 
 import importlib.util

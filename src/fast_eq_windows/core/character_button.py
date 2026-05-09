@@ -1,3 +1,10 @@
+"""`CharacterButton` — the plugin-facing wrapper around one DPG button.
+
+Each button is a child-window containing a real DPG button plus a drawlist
+overlay used for plugin decorations (overlay bars, status badges, dim
+layer).  Plugins should restrict themselves to the public API marked
+below as the "frozen contract"; private members may shift.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
@@ -30,7 +37,7 @@ class CharacterButton:
         display_class: str,
         display_server: str,
         tooltip_text: str,
-        theme_id: int,
+        theme_id: DpgId,
         scheduler: "TickScheduler | None" = None,
     ) -> None:
         self._char = char
@@ -42,9 +49,12 @@ class CharacterButton:
         self._display_class = display_class
         self._display_server = display_server
         self._tooltip_text = tooltip_text
-        self._theme_id = theme_id
+        self._theme_id: DpgId = theme_id
         self._scheduler = scheduler
         self._flash_handle: Any = None
+        # Themes built by set_colors()/flash() that this button owns and must
+        # delete to avoid leaking DPG items across rebinds.
+        self._owned_themes: set[DpgId] = set()
 
         # Overlay state.  Bars retain insertion order so the button owns slot
         # assignment: first kind is slot 0, second kind is slot 1, etc.
@@ -107,8 +117,13 @@ class CharacterButton:
             self._tooltip_text_id = dpg.add_text(self._tooltip_text)
         self._rebuild_overlay()
 
-    def _apply_theme(self, theme_id: int) -> None:
-        """Bind a pre-built theme to the button."""
+    def _apply_theme(self, theme_id: DpgId) -> None:
+        """Bind a pre-built theme to the button.
+
+        Does not take ownership of `theme_id`; callers that build a fresh
+        theme (set_colors / flash) must register it via `_owned_themes` and
+        clean it up themselves.
+        """
         self._theme_id = theme_id
         if self._button_id and dpg.does_item_exist(self._button_id):
             dpg.bind_item_theme(self._button_id, theme_id)
@@ -180,8 +195,13 @@ class CharacterButton:
             )
 
     def _tick(self, dt: float) -> None:
-        """No-op stub — Phase 5 wires per-frame updates (flash, scheduler)."""
-        pass
+        """Reserved for per-frame work driven by the host scheduler.
+
+        Currently unused — flash uses TickScheduler.after directly.  Kept as
+        a hook so the host can opt buttons into per-frame updates later
+        without changing the call site.
+        """
+        return
 
     @staticmethod
     def _contrast_text(color: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -211,7 +231,7 @@ class CharacterButton:
     def set_tooltip(self, text: str) -> None:
         dpg.set_value(self._tooltip_text_id, text)
 
-    def set_theme(self, theme_id: int) -> None:
+    def set_theme(self, theme_id: DpgId) -> None:
         self._base_bg = None
         self._base_fg = None
         self._apply_theme(theme_id)
@@ -225,12 +245,18 @@ class CharacterButton:
     ) -> None:
         """Build a dynamic theme from the given colors and bind it.
 
-        Delegates to build_dynamic_theme in class_colors.py.  Also stores
-        the bg/fg as the new base colors so subsequent set_overlay_bar /
-        set_dim calls can blend relative to this baseline.
+        Delegates to `build_dynamic_theme` in `class_colors.py`.  The previous
+        button-owned theme (if any) is deleted to keep DPG's item table from
+        growing unbounded across repeated calls.  Also stores bg/fg as the new
+        base colors so subsequent set_overlay_bar / set_dim calls can blend
+        relative to this baseline.
         """
         theme_id = build_dynamic_theme(bg, fg, hover, active)
+        self._owned_themes.add(theme_id)
+        prev_owned = self._theme_id if self._theme_id in self._owned_themes else None
         self._apply_theme(theme_id)
+        if prev_owned is not None and prev_owned != theme_id:
+            self._discard_owned_theme(prev_owned)
         # Remember the "base" colors for set_overlay_bar / set_dim recomposition.
         self._base_bg = bg
         self._base_fg = fg
@@ -270,6 +296,8 @@ class CharacterButton:
         """Briefly tint the button by overlaying color_rgba; auto-reverts after ms.
 
         Requires a scheduler at construction time.  Without one, this is a no-op.
+        The flash theme is registered as button-owned and deleted on revert
+        (or on the next flash) so repeated flashes don't leak DPG items.
         """
         if self._scheduler is None:
             return
@@ -279,10 +307,12 @@ class CharacterButton:
         prev_theme = self._theme_id
         # Build a flash theme using color_rgba as bg with white text.
         flash_theme = build_dynamic_theme(color_rgba, (255, 255, 255, 255))
+        self._owned_themes.add(flash_theme)
         self._apply_theme(flash_theme)
 
         def clear_flash() -> None:
             self._apply_theme(prev_theme)
+            self._discard_owned_theme(flash_theme)
             self._flash_handle = None
 
         self._flash_handle = self._scheduler.after(ms / 1000.0, clear_flash)
@@ -294,3 +324,16 @@ class CharacterButton:
             self._flash_handle = None
         if self._container_id and dpg.does_item_exist(self._container_id):
             dpg.delete_item(self._container_id)
+        for theme_id in list(self._owned_themes):
+            self._discard_owned_theme(theme_id)
+
+    def _discard_owned_theme(self, theme_id: DpgId) -> None:
+        """Delete a theme this button created and remove it from the owned set."""
+        self._owned_themes.discard(theme_id)
+        if theme_id and dpg.does_item_exist(theme_id):
+            try:
+                dpg.delete_item(theme_id)
+            except Exception:
+                # DPG occasionally raises if the item was already cleaned up
+                # via a parent cascade; safe to ignore.
+                pass

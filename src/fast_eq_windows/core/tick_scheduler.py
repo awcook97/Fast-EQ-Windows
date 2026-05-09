@@ -1,3 +1,10 @@
+"""Frame-pumped timer used by the host and exposed to plugins via AppContext.
+
+There is no real-time thread: the host calls `pump(now)` once per render
+frame with a monotonic timestamp and any due callbacks fire synchronously.
+This keeps every callback on the DPG main thread, which is the only place
+DearPyGui mutations are safe.
+"""
 from __future__ import annotations
 
 import itertools
@@ -8,11 +15,18 @@ from typing import Callable
 
 @dataclass
 class _Handle:
-    """Opaque handle returned by every() / after().  Plugins keep this to cancel."""
+    """Opaque handle returned by every() / after().  Plugins keep this to cancel.
+
+    `next_fire == float("inf")` is the "unscheduled" sentinel: the handle
+    has a `pending_first_delay` and pump() will rebase it on the first
+    frame it sees.  Once rebased, `next_fire` holds an absolute monotonic
+    timestamp.
+    """
     id: int
     next_fire: float
     interval: float | None  # None means one-shot
     callback: Callable[[], None]
+    pending_first_delay: float = 0.0
     cancelled: bool = field(default=False)
 
 
@@ -35,19 +49,16 @@ class TickScheduler:
 
     def every(self, seconds: float, callback: Callable[[], None]) -> _Handle:
         """Schedule a recurring callback every `seconds`.  First fire is `seconds` from now."""
-        # The "now" used to schedule the first fire is whatever the
-        # next pump() supplies; use 0 as a placeholder that will be
-        # corrected on first pump.  Simpler: register relative to
-        # the next pump's `now` by setting next_fire to a sentinel.
-        # We use float("inf") as the sentinel meaning "rebase on
-        # first pump".
+        # next_fire == inf is a sentinel meaning "rebase on first pump":
+        # we don't have a `now` reading at registration time, and capturing
+        # one here would drift relative to the host's monotonic clock.
         h = _Handle(
             id=next(self._id_gen),
             next_fire=float("inf"),
             interval=float(seconds),
             callback=callback,
+            pending_first_delay=float(seconds),
         )
-        h._pending_first_delay = float(seconds)  # type: ignore[attr-defined]
         self._handles.append(h)
         return h
 
@@ -58,8 +69,8 @@ class TickScheduler:
             next_fire=float("inf"),
             interval=None,
             callback=callback,
+            pending_first_delay=float(seconds),
         )
-        h._pending_first_delay = float(seconds)  # type: ignore[attr-defined]
         self._handles.append(h)
         return h
 
@@ -71,8 +82,7 @@ class TickScheduler:
         # Rebase pending handles whose next_fire is the inf sentinel.
         for h in self._handles:
             if h.next_fire == float("inf"):
-                delay = getattr(h, "_pending_first_delay", 0.0)
-                h.next_fire = now + delay
+                h.next_fire = now + h.pending_first_delay
 
         due: list[_Handle] = [h for h in self._handles if not h.cancelled and h.next_fire <= now]
         for h in due:

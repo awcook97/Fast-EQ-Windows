@@ -1,3 +1,14 @@
+"""User-config layout helpers and bootstrap for `~/.config/fast_eq_windows/`.
+
+Resolves the plugins folder and `plugins.json` path, honoring two env vars:
+
+* `FAST_EQ_PLUGINS` overrides the plugins folder.
+* `FAST_EQ_CONFIG`  overrides the settings JSON path.
+
+`bootstrap()` runs at app start and writes the README, `_template/plugin.py`,
+and an empty `plugins.json` if any are missing.  Existing user files are not
+overwritten; only known stale auto-generated stubs are upgraded in place.
+"""
 import os
 from pathlib import Path
 

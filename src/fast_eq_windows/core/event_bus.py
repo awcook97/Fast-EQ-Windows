@@ -1,3 +1,9 @@
+"""Synchronous publish-subscribe bus shared by host and plugins.
+
+Dispatch is in-process and on the calling thread.  All built-in publishes
+happen on the DPG main thread, so handlers can safely touch widgets.
+Exception isolation is per-subscriber: one bad listener can't block the rest.
+"""
 from __future__ import annotations
 
 import traceback
