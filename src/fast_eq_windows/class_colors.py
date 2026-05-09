@@ -41,3 +41,29 @@ def build_class_theme(eq_class: str) -> int:
             dpg.add_theme_color(dpg.mvThemeCol_Text,          fg,        category=dpg.mvThemeCat_Core)
 
     return theme_id
+
+
+def build_dynamic_theme(
+    bg: tuple[int, int, int, int],
+    fg: tuple[int, int, int, int],
+    hover: tuple[int, int, int, int] | None = None,
+    active: tuple[int, int, int, int] | None = None,
+) -> int:
+    """Build a one-off DPG button theme from arbitrary colors.
+
+    Used by CharacterButton.set_colors when plugins want to override the
+    class default (e.g. HealthBarPlugin lerping toward red).  Mirrors
+    build_class_theme but takes colors directly instead of a class name.
+    """
+    if hover is None:
+        hover = (min(bg[0] + 30, 255), min(bg[1] + 30, 255), min(bg[2] + 30, 255), 255)
+    if active is None:
+        active = (max(bg[0] - 30, 0), max(bg[1] - 30, 0), max(bg[2] - 30, 0), 255)
+
+    with dpg.theme() as theme_id:
+        with dpg.theme_component(dpg.mvButton):
+            dpg.add_theme_color(dpg.mvThemeCol_Button,        bg,     category=dpg.mvThemeCat_Core)
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, hover,  category=dpg.mvThemeCat_Core)
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive,  active, category=dpg.mvThemeCat_Core)
+            dpg.add_theme_color(dpg.mvThemeCol_Text,          fg,     category=dpg.mvThemeCat_Core)
+    return theme_id

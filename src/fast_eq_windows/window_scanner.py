@@ -20,6 +20,38 @@ class EQChar:
     instance: int
     window_id: int
 
+    # Character protocol attributes — derived from existing fields so
+    # _parse_title construction doesn't need to change.
+
+    @property
+    def id(self) -> str:
+        return f"{self.name}.{self.server}"
+
+    @property
+    def display_name(self) -> str:
+        return self.name
+
+    @property
+    def group_row(self) -> str:
+        return self.server
+
+    @property
+    def group_col(self) -> str:
+        return self.eq_class
+
+    @property
+    def sort_key(self) -> str:
+        return self.name.lower()
+
+    @property
+    def raw(self) -> dict:
+        return {
+            "level": self.level,
+            "zone": self.zone,
+            "instance": self.instance,
+            "eq_class": self.eq_class,
+        }
+
 
 def _run(args: list[str], timeout: int = 10) -> str:
     try:

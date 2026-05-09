@@ -1,10 +1,27 @@
 import math
 import queue
 import random
+import time
+from pathlib import Path
+
 import dearpygui.dearpygui as dpg
 
+from .adapters.eq_adapter import EQGameAdapter
 from .class_colors import build_class_theme
-from .window_scanner import EQChar, WindowSnapshot, focus_window
+from .core.button_registry import ButtonRegistry
+from .core.character import Character
+from .core.character_button import CharacterButton
+from .core.event_bus import EventBus
+from .core.game_adapter import GameAdapter
+from .core.plugin import AppContext, AppPaths, Plugin
+from .core.plugin_loader import PluginHost
+from .core.settings_store import SettingsStore
+from .core.tick_scheduler import TickScheduler
+from .core.plugin_paths import (
+    bootstrap as _bootstrap_plugin_dirs,
+    user_config_path,
+    user_plugins_dir,
+)
 from .DearPyGui_EditThemePlugin.EditThemePlugin import EditThemePlugin
 from .DearPyGui_EditThemePlugin.ChooseFontsPlugin import ChooseFontsPlugin
 
@@ -42,13 +59,26 @@ def _anon_class(window_id: int) -> str:
 
 class App:
     def __init__(self) -> None:
-        self._characters: list[EQChar] = []
+        _bootstrap_plugin_dirs()
+        self._characters: list[Character] = []
+        self._buttons: list[CharacterButton] = []
         self._class_themes: dict[str, int] = {}
-        self._result_queue: queue.Queue[list[EQChar]] = queue.Queue()
+        self._result_queue: queue.Queue[list[Character]] = queue.Queue()
         self._anon = "Off"
         self._search = ""
-        self._snapshot = WindowSnapshot(refresh_interval=3600.0)
-        self._snapshot.add_listener(self._on_snapshot)
+        self._adapter: GameAdapter = EQGameAdapter(refresh_interval=3600.0)
+        self._adapter.add_listener(self._on_snapshot)
+
+        self._button_registry = ButtonRegistry()
+        self._events = EventBus()
+        self._scheduler = TickScheduler()
+        self._settings = SettingsStore(path=user_config_path(), scheduler=self._scheduler)
+        self._plugins_menu_id: int | None = None
+        self._plugin_host = PluginHost(
+            plugins_dir=user_plugins_dir(),
+            ctx_factory=self._make_plugin_context,
+        )
+        self._last_tick: float = 0.0
 
     def run(self) -> None:
         dpg.create_context()
@@ -60,10 +90,13 @@ class App:
         dpg.set_primary_window("main_window", True)
         dpg.show_viewport()
 
-        self._snapshot.start()
+        self._load_plugins()
+
+        self._adapter.start()
+        self._last_tick = time.monotonic()
 
         while dpg.is_dearpygui_running():
-            latest: list[EQChar] | None = None
+            latest: list[Character] | None = None
             while True:
                 try:
                     latest = self._result_queue.get_nowait()
@@ -72,11 +105,59 @@ class App:
             if latest is not None:
                 self._characters = latest
                 self._rebuild_table()
+                self._plugin_host.dispatch("on_snapshot", list(self._characters))
+                self._events.publish("snapshot.updated", {"characters": list(self._characters)})
+
+            now = time.monotonic()
+            dt = now - self._last_tick
+            self._last_tick = now
+            self._scheduler.pump(now)
+            self._plugin_host.dispatch("on_tick", dt)
 
             dpg.render_dearpygui_frame()
 
-        self._snapshot.stop()
+        self._events.publish("app.shutdown", {})
+        self._plugin_host.unload_all()
+        self._scheduler.clear()
+        self._events.clear()
+        self._adapter.stop()
         dpg.destroy_context()
+
+    # ------------------------------------------------------------------
+    # Plugin host wiring
+    # ------------------------------------------------------------------
+
+    def _load_plugins(self) -> None:
+        """Discover plugins from disk and load the ones enabled in plugins.json."""
+        self._plugin_host.discover()
+        self._plugin_host.load(self._settings.enabled_plugins)
+
+    def _make_plugin_context(self, plugin: Plugin, plugin_dir: Path) -> AppContext:
+        """Build a plugin-specific AppContext.  Used by PluginHost as ctx_factory."""
+        config_path = user_config_path()
+        return AppContext(
+            plugin_name=plugin.name,
+            adapter=self._adapter,
+            buttons=self._button_registry,
+            paths=AppPaths(
+                plugin_dir=plugin_dir,
+                data_dir=config_path.parent,
+                config_path=config_path,
+            ),
+            _characters_provider=lambda: list(self._characters),
+            _menu_register=self._register_plugin_menu,
+            events=self._events,
+            scheduler=self._scheduler,
+            settings=self._settings.namespace(plugin.name),
+        )
+
+    def _register_plugin_menu(self, label: str, callback) -> int:
+        """Add a menu item under the Plugins menu.  Returns the DPG item id."""
+        if self._plugins_menu_id is None:
+            print(f"[app] _register_plugin_menu called before menu was created")
+            return 0
+        item = dpg.add_menu_item(label=label, callback=callback, parent=self._plugins_menu_id)
+        return int(item) if isinstance(item, int) else 0
 
     def _setup_ui(self) -> None:
         with dpg.viewport_menu_bar():
@@ -89,9 +170,12 @@ class App:
                 pass
             with dpg.menu(label="Fonts") as font_menu:
                 pass
+            with dpg.menu(label="Plugins") as plugins_menu:
+                pass
 
         self._theme_plugin = EditThemePlugin(menu_parent=theme_menu)
         self._font_plugin = ChooseFontsPlugin(menu_parent=font_menu)
+        self._plugins_menu_id = plugins_menu
 
         with dpg.window(tag="main_window", label="EQ Window Manager", no_title_bar=True, no_close=True, no_move=True, no_resize=True, no_scrollbar=True):
             dpg.add_spacer(height=22)
@@ -101,7 +185,7 @@ class App:
                 dpg.add_checkbox(
                     tag="eq_auto_refresh",
                     default_value=True,
-                    callback=lambda s, v: self._snapshot.set_auto(bool(v)),
+                    callback=lambda s, v: self._adapter.set_auto(bool(v)),
                 )
                 dpg.add_text("  Interval (s):")
                 dpg.add_input_float(
@@ -111,7 +195,7 @@ class App:
                     min_value=60.0,
                     max_value=86400.0,
                     step=0,
-                    callback=lambda s, v: setattr(self._snapshot, "refresh_interval", float(v)),
+                    callback=lambda s, v: self._adapter.set_refresh_interval(float(v)),
                 )
                 dpg.add_text("  Anon:")
                 dpg.add_combo(
@@ -149,9 +233,13 @@ class App:
 
     def _on_refresh_clicked(self) -> None:
         dpg.set_value(_STATUS_TEXT, "   Scanning...")
-        self._snapshot.request_refresh()
+        self._adapter.request_refresh()
 
-    def _on_snapshot(self, chars: list[EQChar]) -> None:
+    def _on_button_clicked(self, char: Character) -> None:
+        self._adapter.focus(char)
+        self._events.publish("button.clicked", {"char_id": char.id, "window_id": char.window_id})
+
+    def _on_snapshot(self, chars: list[Character]) -> None:
         # Called on the snapshot worker thread. Hand off to the UI thread
         # via the queue — DPG calls on a background thread can crash.
         self._result_queue.put(list(chars))
@@ -164,28 +252,35 @@ class App:
         self._search = app_data.strip().lower()
         self._rebuild_table()
 
-    def _display_name(self, char: EQChar) -> str:
+    def _display_name(self, char: Character) -> str:
         if self._anon != "Off":
             return _anon_name(char.window_id)
-        return char.name
+        return char.display_name
 
-    def _display_class(self, char: EQChar) -> str:
+    def _display_class(self, char: Character) -> str:
         if self._anon == "Oops: Only Paladins":
             return "Paladin"
         if self._anon in ("Anon: Names+Classes", "Full Anon: Norrath"):
             return _anon_class(char.window_id)
-        return char.eq_class
+        return char.group_col
 
-    def _display_server(self, char: EQChar) -> str:
+    def _display_server(self, char: Character) -> str:
         if self._anon == "Full Anon: Norrath":
             return "Norrath"
-        return char.server
+        return char.group_row
 
     @staticmethod
     def _cell_cols(count: int, target_rows: int) -> int:
         return max(1, math.ceil(count / target_rows))
 
     def _rebuild_table(self) -> None:
+        for b in self._buttons:
+            self._plugin_host.dispatch("on_button_destroy", b)
+            self._events.publish("button.destroyed", {"button": b})
+            self._button_registry._unregister(b)
+            b.destroy()
+        self._buttons = []
+        self._button_registry._clear()
         dpg.delete_item(_TABLE_CONTAINER, children_only=True)
 
         # Apply search filter against display names
@@ -214,7 +309,7 @@ class App:
         servers = sorted({self._display_server(c) for c in chars})
         classes = sorted({self._display_class(c) for c in chars})
 
-        grid: dict[str, dict[str, list[EQChar]]] = {
+        grid: dict[str, dict[str, list[Character]]] = {
             s: {cls: [] for cls in classes} for s in servers
         }
         for char in chars:
@@ -286,29 +381,33 @@ class App:
                                         disp_class = self._display_class(char)
                                         disp_server = self._display_server(char)
                                         if self._anon == "Off":
-                                            tooltip = (
-                                                f"{char.name}.{char.server}\n"
-                                                f"Lvl {char.level} {char.eq_class}\n"
-                                                f"{char.zone}"
-                                                + (f"  ({char.instance})" if char.instance else "")
-                                            )
+                                            tooltip = self._adapter.tooltip_for(char)
                                         else:
+                                            level = char.raw.get("level", "?")
+                                            zone = char.raw.get("zone", "")
+                                            instance = char.raw.get("instance", 0)
+                                            tail = f"  ({instance})" if instance else ""
                                             tooltip = (
                                                 f"{disp_name}.{disp_server}\n"
-                                                f"Lvl {char.level} {disp_class}\n"
-                                                f"{char.zone}"
-                                                + (f"  ({char.instance})" if char.instance else "")
+                                                f"Lvl {level} {disp_class}\n"
+                                                f"{zone}{tail}"
                                             )
-                                        btn = dpg.add_button(
-                                            label=disp_name,
-                                            callback=lambda s, a, u: focus_window(u),
-                                            user_data=char.window_id,
+                                        button = CharacterButton(
+                                            char=char,
+                                            on_click=lambda s, a, u, c=char: self._on_button_clicked(c),
                                             width=_BUTTON_WIDTH,
                                             height=_BUTTON_HEIGHT,
+                                            display_name=disp_name,
+                                            display_class=disp_class,
+                                            display_server=disp_server,
+                                            tooltip_text=tooltip,
+                                            theme_id=self._get_class_theme(disp_class),
+                                            scheduler=self._scheduler,
                                         )
-                                        dpg.bind_item_theme(btn, self._get_class_theme(disp_class))
-                                        with dpg.tooltip(btn):
-                                            dpg.add_text(tooltip)
+                                        self._buttons.append(button)
+                                        self._button_registry._register(button)
+                                        self._plugin_host.dispatch("on_button_create", button)
+                                        self._events.publish("button.created", {"button": button})
                                     for _ in range(ncols - len(chunk)):
                                         dpg.add_text("")
 
@@ -319,7 +418,7 @@ class App:
         servers: list[str],
         classes: list[str],
         class_weight: dict[str, int],
-        grid: dict[str, dict[str, list[EQChar]]],
+        grid: dict[str, dict[str, list[Character]]],
         target_rows: int,
     ) -> None:
         # Width: fixed server col + each class col's natural pixel width + borders/padding
