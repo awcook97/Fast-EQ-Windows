@@ -1,6 +1,7 @@
 import math
 import queue
 import random
+import subprocess
 import time
 from pathlib import Path
 
@@ -69,14 +70,18 @@ class App:
         self._adapter: GameAdapter = EQGameAdapter(refresh_interval=3600.0)
         self._adapter.add_listener(self._on_snapshot)
 
-        self._button_registry = ButtonRegistry()
         self._events = EventBus()
+        self._button_registry = ButtonRegistry(events=self._events)
         self._scheduler = TickScheduler()
         self._settings = SettingsStore(path=user_config_path(), scheduler=self._scheduler)
         self._plugins_menu_id: int | None = None
+        self._plugin_menu_item_ids: list[int] = []
         self._plugin_host = PluginHost(
             plugins_dir=user_plugins_dir(),
             ctx_factory=self._make_plugin_context,
+        )
+        self._events.subscribe_all(
+            lambda name, payload: self._plugin_host.dispatch("on_event", name, payload)
         )
         self._last_tick: float = 0.0
 
@@ -132,6 +137,23 @@ class App:
         self._plugin_host.discover()
         self._plugin_host.load(self._settings.enabled_plugins)
 
+    def _reload_plugins(self, *_) -> None:
+        """Reload plugins from disk without restarting the host app."""
+        self._plugin_host.unload_all()
+        self._clear_plugin_menu_items()
+        self._settings.reload()
+        self._load_plugins()
+
+        # Reload happens while buttons may already exist.  Replay the current
+        # host state so newly loaded plugins can initialize their UI state.
+        for button in self._button_registry.all():
+            self._plugin_host.dispatch("on_button_create", button)
+        self._plugin_host.dispatch("on_snapshot", list(self._characters))
+
+        if dpg.does_item_exist(_STATUS_TEXT):
+            count = len(self._plugin_host.loaded)
+            dpg.set_value(_STATUS_TEXT, f"   Reloaded {count} plugin{'s' if count != 1 else ''}")
+
     def _make_plugin_context(self, plugin: Plugin, plugin_dir: Path) -> AppContext:
         """Build a plugin-specific AppContext.  Used by PluginHost as ctx_factory."""
         config_path = user_config_path()
@@ -157,7 +179,30 @@ class App:
             print(f"[app] _register_plugin_menu called before menu was created")
             return 0
         item = dpg.add_menu_item(label=label, callback=callback, parent=self._plugins_menu_id)
-        return int(item) if isinstance(item, int) else 0
+        item_id = int(item) if isinstance(item, int) else 0
+        if item_id:
+            self._plugin_menu_item_ids.append(item_id)
+        return item_id
+
+    def _clear_plugin_menu_items(self) -> None:
+        """Remove menu items registered by plugins during a previous load."""
+        for item_id in self._plugin_menu_item_ids:
+            if dpg.does_item_exist(item_id):
+                dpg.delete_item(item_id)
+        self._plugin_menu_item_ids.clear()
+
+    def _open_plugins_folder(self, *_) -> None:
+        self._open_folder(user_plugins_dir())
+
+    def _open_settings_folder(self, *_) -> None:
+        self._open_folder(user_config_path().parent)
+
+    def _open_folder(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:
+            print(f"[app] could not open {path}: {exc}")
 
     def _setup_ui(self) -> None:
         with dpg.viewport_menu_bar():
@@ -171,7 +216,11 @@ class App:
             with dpg.menu(label="Fonts") as font_menu:
                 pass
             with dpg.menu(label="Plugins") as plugins_menu:
-                pass
+                dpg.add_menu_item(label="Reload", callback=self._reload_plugins)
+                dpg.add_separator()
+                dpg.add_menu_item(label="Open plugins folder", callback=self._open_plugins_folder)
+                dpg.add_menu_item(label="Open settings folder", callback=self._open_settings_folder)
+                dpg.add_separator()
 
         self._theme_plugin = EditThemePlugin(menu_parent=theme_menu)
         self._font_plugin = ChooseFontsPlugin(menu_parent=font_menu)
@@ -276,7 +325,6 @@ class App:
     def _rebuild_table(self) -> None:
         for b in self._buttons:
             self._plugin_host.dispatch("on_button_destroy", b)
-            self._events.publish("button.destroyed", {"button": b})
             self._button_registry._unregister(b)
             b.destroy()
         self._buttons = []
@@ -394,7 +442,8 @@ class App:
                                             )
                                         button = CharacterButton(
                                             char=char,
-                                            on_click=lambda s, a, u, c=char: self._on_button_clicked(c),
+                                            parent_id=None,
+                                            on_click=lambda *_, c=char: self._on_button_clicked(c),
                                             width=_BUTTON_WIDTH,
                                             height=_BUTTON_HEIGHT,
                                             display_name=disp_name,
@@ -407,7 +456,6 @@ class App:
                                         self._buttons.append(button)
                                         self._button_registry._register(button)
                                         self._plugin_host.dispatch("on_button_create", button)
-                                        self._events.publish("button.created", {"button": button})
                                     for _ in range(ncols - len(chunk)):
                                         dpg.add_text("")
 

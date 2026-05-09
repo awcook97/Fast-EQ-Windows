@@ -90,14 +90,14 @@ docs/
 
 ## Phase 0 — Setup, no behavior change
 
-- [ ] Create `src/fast_eq_windows/core/` package with empty `__init__.py`
-- [ ] Create `src/fast_eq_windows/adapters/` package with empty `__init__.py`
-- [ ] Create `src/fast_eq_windows/core/plugin_paths.py` with:
+- [x] Create `src/fast_eq_windows/core/` package with empty `__init__.py`
+- [x] Create `src/fast_eq_windows/adapters/` package with empty `__init__.py`
+- [x] Create `src/fast_eq_windows/core/plugin_paths.py` with:
   - `user_plugins_dir()` — returns `Path` resolved from `$FAST_EQ_PLUGINS` → `~/.config/fast_eq_windows/plugins/` → `~/.fast_eq_windows/plugins/`
   - `user_config_path()` — returns `$FAST_EQ_CONFIG` → `~/.config/fast_eq_windows/plugins.json`
   - `bootstrap()` — on first launch, `mkdir -p` the plugins dir, write a `README.md` explaining the convention, and write `_template/plugin.py` skeleton if absent. Idempotent: never overwrites existing files.
-- [ ] Wire `bootstrap()` into `App.__init__` so it runs once at startup before plugin discovery
-- [ ] Do NOT add a `plugins/` or `config/` directory inside the repo. Do NOT modify `pyproject.toml` or `build_launcher.py` to bundle plugins — plugins live outside the binary.
+- [x] Wire `bootstrap()` into `App.__init__` so it runs once at startup before plugin discovery
+- [x] Do NOT add a `plugins/` or `config/` directory inside the repo. Do NOT modify `pyproject.toml` or `build_launcher.py` to bundle plugins — plugins live outside the binary.
 
 **Verify**: `uv run fast-eq-windows` still launches; on first launch `~/.config/fast_eq_windows/plugins/` is created with `README.md` and `_template/plugin.py`; no runtime change to existing UI; nothing inside the repo changed structurally beyond the `core/` and `adapters/` packages.
 
@@ -107,7 +107,7 @@ docs/
 
 Extract per-button DPG creation into a class. No external behavior change.
 
-- [ ] Create `src/fast_eq_windows/core/character_button.py` with class `CharacterButton`
+- [x] Create `src/fast_eq_windows/core/character_button.py` with class `CharacterButton`
   - Constructor: `char`, `parent_id`, `on_click`, `width`, `height`, `display_name`, `display_class`, `display_server`, `tooltip_text`, `theme_id`
   - Holds DPG ids: `_button_id`, `_tooltip_id`, `_tooltip_text_id`
   - **Public API (plugin-facing, frozen contract):**
@@ -122,8 +122,8 @@ Extract per-button DPG creation into a class. No external behavior change.
     - `destroy()`
     - `char` (read-only property), `dpg_id` (read-only escape hatch)
   - **Private:** `_create_dpg_button()`, `_apply_theme()`, `_rebuild_overlay()`, `_tick(dt)` (no-op until Phase 4)
-- [ ] In `src/fast_eq_windows/app.py` lines 282-313, replace the `dpg.add_button(...)` + tooltip block with `CharacterButton(...)`
-- [ ] `_rebuild_table` keeps `self._buttons: list[CharacterButton]`; calls `b.destroy()` on the previous list before rebuild
+- [x] In `src/fast_eq_windows/app.py` lines 282-313, replace the `dpg.add_button(...)` + tooltip block with `CharacterButton(...)`
+- [x] `_rebuild_table` keeps `self._buttons: list[CharacterButton]`; calls `b.destroy()` on the previous list before rebuild
 
 **Verify**: buttons render identically; click focuses window; tooltip works; search + anon modes unchanged.
 
@@ -133,7 +133,7 @@ Extract per-button DPG creation into a class. No external behavior change.
 
 Goal: nothing outside the adapter imports `EQChar` directly.
 
-- [ ] Create `src/fast_eq_windows/core/character.py` — `Character` `Protocol`:
+- [x] Create `src/fast_eq_windows/core/character.py` — `Character` `Protocol`:
   ```python
   id: str           # stable key, EQ uses f"{name}.{server}"
   display_name: str # default button label
@@ -143,12 +143,12 @@ Goal: nothing outside the adapter imports `EQChar` directly.
   window_id: int    # OS handle for focus
   raw: dict         # adapter-specific extras (level, zone, etc.)
   ```
-- [ ] Create `src/fast_eq_windows/core/game_adapter.py` — `GameAdapter` ABC: `start`, `stop`, `request_refresh`, `add_listener(cb)`, `focus(character)`, optional `row_label`, `col_labels`, `tooltip_for`
-- [ ] Create `src/fast_eq_windows/adapters/eq_adapter.py` `EQGameAdapter` wrapping `WindowSnapshot`
+- [x] Create `src/fast_eq_windows/core/game_adapter.py` — `GameAdapter` ABC: `start`, `stop`, `request_refresh`, `add_listener(cb)`, `focus(character)`, optional `row_label`, `col_labels`, `tooltip_for`
+- [x] Create `src/fast_eq_windows/adapters/eq_adapter.py` `EQGameAdapter` wrapping `WindowSnapshot`
   - Adds protocol attributes to `EQChar` (`id`, `display_name`, `group_row`, `group_col`, `sort_key`, `raw`) — protocol is duck-typed, so adding properties to `EQChar` is enough; do NOT subclass
   - `tooltip_for` reproduces tooltip logic from `app.py:289-301`
-- [ ] In `app.py`, replace `WindowSnapshot` with `self._adapter: GameAdapter = EQGameAdapter(...)`
-- [ ] `_rebuild_table` iterates `Character` objects via the protocol; anon helpers (`_anon_name`, `_anon_class`) stay in `app.py` as a presentation layer over the protocol
+- [x] In `app.py`, replace `WindowSnapshot` with `self._adapter: GameAdapter = EQGameAdapter(...)`
+- [x] `_rebuild_table` iterates `Character` objects via the protocol; anon helpers (`_anon_name`, `_anon_class`) stay in `app.py` as a presentation layer over the protocol
 
 **Verify**: app behaves identically; anon modes still work; `app._adapter.name == "everquest"`.
 
@@ -156,10 +156,10 @@ Goal: nothing outside the adapter imports `EQChar` directly.
 
 ## Phase 3 — Plugin lifecycle, AppContext, and loader
 
-- [ ] Create `src/fast_eq_windows/core/plugin.py` `Plugin` base class:
+- [x] Create `src/fast_eq_windows/core/plugin.py` `Plugin` base class:
   - `name`, `version`, `requires` class attrs
   - Hooks: `on_load(ctx)`, `on_unload()`, `on_snapshot(chars)`, `on_button_create(button)`, `on_button_destroy(button)`, `on_tick(dt)`, `on_event(name, payload)`
-- [ ] Define `AppContext` dataclass exposing:
+- [x] Define `AppContext` dataclass exposing:
   - `characters() -> list[Character]` (read-only snapshot)
   - `buttons` → `ButtonRegistry`
   - `events` → `EventBus` (Phase 5)
@@ -169,20 +169,20 @@ Goal: nothing outside the adapter imports `EQChar` directly.
   - `log(msg)` — namespaced print
   - `paths` → `plugin_dir`, `data_dir`, `config_path`
   - `register_menu(label, callback)` — adds under "Plugins" menu
-- [ ] Create `src/fast_eq_windows/core/button_registry.py`: `get(char_id)`, `by_window_id(wid)`, `all()`, `for_class(group_col)`, internal `_register/_unregister`
-- [ ] Create `src/fast_eq_windows/core/plugin_loader.py` `PluginHost`:
+- [x] Create `src/fast_eq_windows/core/button_registry.py`: `get(char_id)`, `by_window_id(wid)`, `all()`, `for_class(group_col)`, internal `_register/_unregister`
+- [x] Create `src/fast_eq_windows/core/plugin_loader.py` `PluginHost`:
   - `discover(plugins_dir)` — `importlib.util.spec_from_file_location` per subdir
   - `load(enabled_names)` — topological sort over `requires`, calls `on_load(ctx)`
   - `unload_all()` — reverse order, calls `on_unload()`
   - `dispatch(method_name, *args)` — fan-out, per-plugin try/except so a bad plugin can't crash the host (logs traceback with plugin name)
-- [ ] In `app.py`:
+- [x] In `app.py`:
   - Add a "Plugins" menu in `_setup_ui` next to Theme/Fonts
   - In `__init__`: build `AppContext`, `host.discover()`, `host.load(enabled)`
   - In `run()`: dispatch `on_tick(dt)` per frame
   - In `_on_snapshot` flow: dispatch `on_snapshot(characters)` after `_rebuild_table`
   - In `_rebuild_table`: dispatch `on_button_create(button)` after each `CharacterButton` is registered; `on_button_destroy(button)` before destruction
   - Before `dpg.destroy_context()`: `host.unload_all()`
-- [ ] For verification only: drop a tiny throwaway `_smoketest/plugin.py` in the user plugins dir (`~/.config/fast_eq_windows/plugins/_smoketest/plugin.py`) that logs in `on_load` and `on_button_create`. Enable in `~/.config/fast_eq_windows/plugins.json`, verify, then delete. **This is verification scaffolding done on the user's machine, NOT a file checked into the repo.**
+- [x] For verification only: drop a tiny throwaway `_smoketest/plugin.py` in the user plugins dir (`~/.config/fast_eq_windows/plugins/_smoketest/plugin.py`) that logs in `on_load` and `on_button_create`. Enable in `~/.config/fast_eq_windows/plugins.json`, verify, then delete. **This is verification scaffolding done on the user's machine, NOT a file checked into the repo.** Verified with an isolated temporary plugin/config smoke test so no persistent user plugin files were left behind.
 
 **Verify**: smoketest logs appear when enabled; disabling silences logs; `raise RuntimeError("test")` inside the smoketest does NOT crash the app. Then delete `~/.config/fast_eq_windows/plugins/_smoketest/`.
 
@@ -192,14 +192,14 @@ Goal: nothing outside the adapter imports `EQChar` directly.
 
 Goal: plugins update buttons every frame/tick without DPG widget churn. This is the technical foundation for any visual plugin.
 
-- [ ] Restructure `CharacterButton` rendering: per-button `dpg.child_window` (no scrollbar/padding) holding a `dpg.drawlist` and the actual button. Bars + badges drawn onto the drawlist as `draw_rectangle`/`draw_text` primitives — cheap to clear and re-add
-- [ ] Implement `set_overlay_bar(kind, pct, color)`:
+- [x] Restructure `CharacterButton` rendering: per-button `dpg.child_window` (no scrollbar/padding) holding a `dpg.drawlist` and the actual button. Bars + badges drawn onto the drawlist as `draw_rectangle`/`draw_text` primitives — cheap to clear and re-add
+- [x] Implement `set_overlay_bar(kind, pct, color)`:
   - Stores in `self._bars[kind]`
   - `_rebuild_overlay()` clears drawlist and redraws all bars in insertion-slot order (slot 0 top, slot 1 below, etc.) — plugin doesn't pick slot, button does
-- [ ] Implement `set_status_badge(text, color)` — `draw_text` in top-right of drawlist
-- [ ] Implement `set_dim(amount)` — translucent black `draw_rectangle` overlay with given alpha
-- [ ] Implement `set_colors(bg, fg, hover=None, active=None)` — builds an ad-hoc theme via a new `class_colors.build_dynamic_theme(bg, fg, hover, active)` helper (sibling of `build_class_theme` at line 31) and binds it
-- [ ] **Optimization (recommended last in this phase):** in `_rebuild_table`, diff new char list against `self._buttons` by `char.id`. Only destroy gone, only create new, update labels/themes on existing. Preserves plugin state across rebuilds. If too invasive, defer to Phase 4b — but then plugins must be idempotent in `on_button_create` (re-apply from cached state keyed by `char.id`).
+- [x] Implement `set_status_badge(text, color)` — `draw_text` in top-right of drawlist
+- [x] Implement `set_dim(amount)` — translucent black `draw_rectangle` overlay with given alpha
+- [x] Implement `set_colors(bg, fg, hover=None, active=None)` — builds an ad-hoc theme via a new `class_colors.build_dynamic_theme(bg, fg, hover, active)` helper (sibling of `build_class_theme` at line 31) and binds it
+- [x] **Optimization (recommended last in this phase):** in `_rebuild_table`, diff new char list against `self._buttons` by `char.id`. Only destroy gone, only create new, update labels/themes on existing. Preserves plugin state across rebuilds. If too invasive, defer to Phase 4b — but then plugins must be idempotent in `on_button_create` (re-apply from cached state keyed by `char.id`). **Status:** deferred per the plan; `docs/PLUGINS.md` documents the idempotent `on_button_create` requirement.
 
 **Verify**: from a temporary smoketest plugin, `ctx.buttons.all()[0].set_overlay_bar("foo", 0.5, (0,255,0,180))` shows a green half-bar; `set_dim(0.5)` darkens; clicks still focus (drawlist must not eat input). Remove smoketest after.
 
@@ -207,12 +207,12 @@ Goal: plugins update buttons every frame/tick without DPG widget churn. This is 
 
 ## Phase 5 — Event bus + tick scheduler
 
-- [ ] Create `src/fast_eq_windows/core/event_bus.py`: `subscribe`, `unsubscribe`, `publish(name, payload)` synchronous fan-out, per-subscriber try/except
+- [x] Create `src/fast_eq_windows/core/event_bus.py`: `subscribe`, `unsubscribe`, `publish(name, payload)` synchronous fan-out, per-subscriber try/except
   - Built-in events emitted by the host: `snapshot.updated`, `button.created`, `button.destroyed`, `button.clicked`, `app.shutdown`. Plugins are free to define their own namespaces (`health.update`, `loading.started`, etc.) — the host doesn't reserve names.
-- [ ] Create `src/fast_eq_windows/core/tick_scheduler.py`: `every(seconds, cb)`, `after(seconds, cb)`, `cancel(handle)`, `pump(now)` — called from main loop
-- [ ] In `app.run()`: `self._ctx.scheduler.pump(time.monotonic())` per frame, then `host.dispatch("on_tick", dt)`
-- [ ] `ButtonRegistry` publishes `button.created`/`button.destroyed`. Button click path publishes `button.clicked` with `{char_id, window_id}`
-- [ ] Wire `CharacterButton.flash(color, ms)` to use `scheduler.after(ms, clear)` now that the scheduler exists
+- [x] Create `src/fast_eq_windows/core/tick_scheduler.py`: `every(seconds, cb)`, `after(seconds, cb)`, `cancel(handle)`, `pump(now)` — called from main loop
+- [x] In `app.run()`: `self._ctx.scheduler.pump(time.monotonic())` per frame, then `host.dispatch("on_tick", dt)`
+- [x] `ButtonRegistry` publishes `button.created`/`button.destroyed`. Button click path publishes `button.clicked` with `{char_id, window_id}`
+- [x] Wire `CharacterButton.flash(color, ms)` to use `scheduler.after(ms, clear)` now that the scheduler exists
 
 **Verify**: temporary smoketest subscribes to `button.clicked` and logs char id on click; `scheduler.every(1.0, ...)` logs once per second. Remove smoketest after.
 
@@ -220,13 +220,13 @@ Goal: plugins update buttons every frame/tick without DPG widget churn. This is 
 
 ## Phase 6 — Plugin settings persistence
 
-- [ ] Create `src/fast_eq_windows/core/settings_store.py`:
+- [x] Create `src/fast_eq_windows/core/settings_store.py`:
   - `SettingsStore(path)` loads/saves single JSON file
   - `namespace(plugin_name) -> SettingsNamespace` with `get(key, default)`, `set(key, value)`, `save()`
   - Auto-saves on `set` debounced ≤500ms via `TickScheduler`
-- [ ] `AppContext.settings` is the namespace bound to that plugin's name
-- [ ] Add "Plugins → Open settings folder" menu (full GUI editor out of scope)
-- [ ] `config/plugins.json` schema:
+- [x] `AppContext.settings` is the namespace bound to that plugin's name
+- [x] Add "Plugins → Open settings folder" menu (full GUI editor out of scope)
+- [x] `config/plugins.json` schema:
   ```json
   {
     "enabled": [],
@@ -241,9 +241,9 @@ Goal: plugins update buttons every frame/tick without DPG widget churn. This is 
 
 ## Phase 7 — Polish + documentation
 
-- [ ] `_template/plugin.py` skeleton (the one written by `bootstrap()` in Phase 0) gets fleshed out with comments showing every lifecycle hook and `AppContext` surface — a real copy-paste starter
-- [ ] The auto-written `README.md` in `~/.config/fast_eq_windows/plugins/` gets fleshed out: directory convention, how to enable a plugin, link to docs/PLUGINS.md
-- [ ] `docs/PLUGINS.md` (in the repo) documenting:
+- [x] `_template/plugin.py` skeleton (the one written by `bootstrap()` in Phase 0) gets fleshed out with comments showing every lifecycle hook and `AppContext` surface — a real copy-paste starter
+- [x] The auto-written `README.md` in `~/.config/fast_eq_windows/plugins/` gets fleshed out: directory convention, how to enable a plugin, link to docs/PLUGINS.md
+- [x] `docs/PLUGINS.md` (in the repo) documenting:
   - **Where plugins go**: `~/.config/fast_eq_windows/plugins/<name>/plugin.py` (and the env-var override + fallback path)
   - The `Plugin` lifecycle hooks
   - The `AppContext` API surface
@@ -253,9 +253,9 @@ Goal: plugins update buttons every frame/tick without DPG widget churn. This is 
   - Built-in event names
   - Convention: plugin-emitted events use a namespace (`<plugin_name>.<event>`)
   - Settings file format and location
-- [ ] "Plugins → Reload" menu — `unload_all → re-discover → load`. Plugins MUST honor `on_unload` (close sockets, cancel scheduler handles). Caveats documented in PLUGINS.md.
-- [ ] "Plugins → Open plugins folder" menu — opens `user_plugins_dir()` in the system file manager
-- [ ] Update repo `README.md` with a Plugins section pointing users to `~/.config/fast_eq_windows/plugins/` and `docs/PLUGINS.md`
+- [x] "Plugins → Reload" menu — `unload_all → re-discover → load`. Plugins MUST honor `on_unload` (close sockets, cancel scheduler handles). Caveats documented in PLUGINS.md.
+- [x] "Plugins → Open plugins folder" menu — opens `user_plugins_dir()` in the system file manager
+- [x] Update repo `README.md` with a Plugins section pointing users to `~/.config/fast_eq_windows/plugins/` and `docs/PLUGINS.md`
 
 **Verify**: repo README and on-disk `~/.config/fast_eq_windows/plugins/README.md` both read cleanly; the `_template` plugin can be enabled and runs without errors; reload menu works.
 

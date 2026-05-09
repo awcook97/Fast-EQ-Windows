@@ -1,6 +1,6 @@
 [project]
 name = "fast-eq-windows"
-version = "0.1.0"
+version = "0.2.0"
 description = "A fast GUI for switching to the correct EverQuest window that you want to see."
 readme = "README.md"
 authors = [

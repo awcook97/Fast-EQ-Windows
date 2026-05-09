@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .button_registry import ButtonRegistry
@@ -75,10 +75,9 @@ class AppContext:
     # _menu_register: takes (label, callback), returns the DPG menu-item id.
     _menu_register: Callable[[str, Callable], int]
 
-    # Wired by later phases — Optional in Phase 3.
-    events: Optional["EventBus"] = None
-    scheduler: Optional["TickScheduler"] = None
-    settings: Optional["SettingsNamespace"] = None
+    events: "EventBus"
+    scheduler: "TickScheduler"
+    settings: "SettingsNamespace"
 
     def characters(self) -> list["Character"]:
         """Return a fresh snapshot of the current character list."""

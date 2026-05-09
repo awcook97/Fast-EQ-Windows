@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .character_button import CharacterButton
+    from .event_bus import EventBus
 
 
 class ButtonRegistry:
@@ -12,14 +13,17 @@ class ButtonRegistry:
     The host (App) calls _register / _unregister as buttons come and go.
     Plugins query via the public methods.
 
-    Phase 5 will hook this into the EventBus to publish button.created /
-    button.destroyed events on register/unregister.  For Phase 3 the
-    registry is purely a lookup table.
+    If an EventBus is supplied, register/unregister also publish
+    button.created and button.destroyed lifecycle events.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, events: "EventBus | None" = None) -> None:
         self._by_id: dict[str, "CharacterButton"] = {}      # char.id -> button
         self._by_window: dict[int, "CharacterButton"] = {}  # window_id -> button
+        self._events = events
+
+    def set_event_bus(self, events: "EventBus | None") -> None:
+        self._events = events
 
     # ------------------------------------------------------------------
     # Public API — plugins use these
@@ -48,11 +52,15 @@ class ButtonRegistry:
         char = button.char
         self._by_id[char.id] = button
         self._by_window[char.window_id] = button
+        if self._events is not None:
+            self._events.publish("button.created", {"button": button})
 
     def _unregister(self, button: "CharacterButton") -> None:
         char = button.char
         self._by_id.pop(char.id, None)
         self._by_window.pop(char.window_id, None)
+        if self._events is not None:
+            self._events.publish("button.destroyed", {"button": button})
 
     def _clear(self) -> None:
         """Clear all entries — used when the table is fully rebuilt."""

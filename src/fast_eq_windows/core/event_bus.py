@@ -25,6 +25,7 @@ class EventBus:
 
     def __init__(self) -> None:
         self._subscribers: dict[str, list[Callable[[dict], None]]] = defaultdict(list)
+        self._all_subscribers: list[Callable[[str, dict], None]] = []
 
     def subscribe(self, event_name: str, callback: Callable[[dict], None]) -> None:
         self._subscribers[event_name].append(callback)
@@ -33,6 +34,16 @@ class EventBus:
         try:
             self._subscribers[event_name].remove(callback)
         except (KeyError, ValueError):
+            pass
+
+    def subscribe_all(self, callback: Callable[[str, dict], None]) -> None:
+        """Subscribe to every event.  Used by the host to drive Plugin.on_event."""
+        self._all_subscribers.append(callback)
+
+    def unsubscribe_all(self, callback: Callable[[str, dict], None]) -> None:
+        try:
+            self._all_subscribers.remove(callback)
+        except ValueError:
             pass
 
     def publish(self, event_name: str, payload: dict | None = None) -> None:
@@ -46,7 +57,14 @@ class EventBus:
             except Exception:
                 print(f"[event_bus] error in subscriber for '{event_name}':")
                 traceback.print_exc()
+        for cb in list(self._all_subscribers):
+            try:
+                cb(event_name, payload)
+            except Exception:
+                print(f"[event_bus] error in all-event subscriber for '{event_name}':")
+                traceback.print_exc()
 
     def clear(self) -> None:
-        """Remove all subscribers — used at app shutdown / plugin reload."""
+        """Remove all subscribers — used at app shutdown."""
         self._subscribers.clear()
+        self._all_subscribers.clear()

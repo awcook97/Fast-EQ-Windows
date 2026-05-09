@@ -27,6 +27,44 @@ A lightweight EverQuest window manager for Linux multiboxers. Scans running EQ c
 - **Zoning-aware** — characters whose titles haven't settled (mid-zone) are skipped on the current tick and pick up automatically on the next refresh
 - Window auto-sizes to fit content — starts small and grows as characters populate
 - Customizable theme and fonts via built-in editor
+- Runtime plugin system — drop trusted Python plugins into your user config folder and reload them without rebuilding the app
+
+---
+
+## Plugins
+
+Fast EQ Windows loads user plugins from disk at runtime. Plugins are **not**
+bundled into release binaries; they live in your user config folder:
+
+```text
+~/.config/fast_eq_windows/plugins/<plugin_name>/plugin.py
+```
+
+Enable plugins in:
+
+```text
+~/.config/fast_eq_windows/plugins.json
+```
+
+Example:
+
+```json
+{
+  "enabled": ["my_plugin"],
+  "settings": {}
+}
+```
+
+The app creates the plugin folder, a local README, and `_template/plugin.py` on
+first launch. Use **Plugins → Reload** after editing `plugins.json` or plugin
+source files. Use **Plugins → Open plugins folder** or **Plugins → Open settings
+folder** from the menu for quick access.
+
+See [docs/PLUGINS.md](docs/PLUGINS.md) for the full lifecycle, API contract,
+events, threading rules, and settings format.
+
+Security note: plugins are normal Python code with full access to your user
+account. Only install plugins you trust.
 
 ---
 
