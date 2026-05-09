@@ -19,14 +19,18 @@ uv sync
 
 # ── System deps ───────────────────────────────────────────────────────────────
 echo "[3/3] Checking system dependencies..."
-if ! command -v xdotool >/dev/null 2>&1; then
+missing=()
+command -v wmctrl  >/dev/null 2>&1 || missing+=("wmctrl")
+command -v xdotool >/dev/null 2>&1 || missing+=("xdotool")
+if [ ${#missing[@]} -ne 0 ]; then
     echo ""
-    echo "  WARNING: xdotool not found. Install it:"
-    echo "    Ubuntu/Debian : sudo apt install xdotool"
-    echo "    Fedora/RHEL   : sudo dnf install xdotool"
-    echo "    Arch          : sudo pacman -S xdotool"
+    echo "  WARNING: missing: ${missing[*]}. Install with:"
+    echo "    Ubuntu/Debian : sudo apt install ${missing[*]}"
+    echo "    Fedora/RHEL   : sudo dnf install ${missing[*]}"
+    echo "    Arch          : sudo pacman -S ${missing[*]}"
     echo ""
 else
+    echo "  wmctrl OK  ($(wmctrl -m 2>/dev/null | head -1))"
     echo "  xdotool OK ($(xdotool --version 2>&1 | head -1))"
 fi
 

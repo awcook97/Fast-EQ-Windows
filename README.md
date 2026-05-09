@@ -10,7 +10,7 @@ A lightweight EverQuest window manager for Linux multiboxers. Scans running EQ c
 
 ## Features
 
-- Auto-detects all running EQ clients via `xdotool` + Wine process scanning
+- Auto-detects all running EQ clients via a single `wmctrl` X11 round-trip (cheap even at 100+ boxes)
 - Grid layout: **rows = servers**, **columns = classes** — only what's actually running
 - Buttons sorted alphabetically by character name within each class
 - Up to 6 characters per column before wrapping to a second column
@@ -23,9 +23,8 @@ A lightweight EverQuest window manager for Linux multiboxers. Scans running EQ c
   - **Anon: Names+Classes** — names and classes both randomized
   - **Oops: Only Paladins** — everyone shows as Paladin
   - **Full Anon: Norrath** — names, classes, and server all randomized; all characters merged into one "Norrath" server
-- Auto-refresh on a configurable interval (default: 1 hour)
-- **Streaming scan** — characters pop into the grid as they're found; UI never blocks
-- **Zoning retry** — characters mid-zone (non-EQ window title) are retried every 2 s for up to 30 s in the background, then added to the grid when they finish loading
+- Auto-refresh on a configurable interval (default: 1 hour) — runs on a single background thread
+- **Zoning-aware** — characters whose titles haven't settled (mid-zone) are skipped on the current tick and pick up automatically on the next refresh
 - Window auto-sizes to fit content — starts small and grows as characters populate
 - Customizable theme and fonts via built-in editor
 
@@ -34,7 +33,8 @@ A lightweight EverQuest window manager for Linux multiboxers. Scans running EQ c
 ## Requirements
 
 - **Linux** with X11 (Wayland via XWayland should also work)
-- [`xdotool`](https://github.com/jordansissel/xdotool)
+- [`wmctrl`](https://www.freedesktop.org/wiki/Software/wmctrl/) — used to list windows in one round-trip
+- [`xdotool`](https://github.com/jordansissel/xdotool) — used only when you click a button (focus/raise)
 - EverQuest running under **Wine** (`eqgame.exe patchme /login:...`)
 
 ---
@@ -63,16 +63,16 @@ cd Fast_EQ_Windows
 `setup.sh` will:
 1. Install [uv](https://github.com/astral-sh/uv) if it isn't already
 2. Install all Python dependencies
-3. Check for `xdotool` and tell you how to install it if missing
+3. Check for `wmctrl` + `xdotool` and tell you how to install them if missing
 4. Create two launcher scripts in the project directory
 
-**Install xdotool if prompted:**
+**Install wmctrl + xdotool if prompted:**
 
 | Distro | Command |
 |--------|---------|
-| Ubuntu / Debian | `sudo apt install xdotool` |
-| Fedora / RHEL | `sudo dnf install xdotool` |
-| Arch | `sudo pacman -S xdotool` |
+| Ubuntu / Debian | `sudo apt install wmctrl xdotool` |
+| Fedora / RHEL | `sudo dnf install wmctrl xdotool` |
+| Arch | `sudo pacman -S wmctrl xdotool` |
 
 ---
 
@@ -178,14 +178,16 @@ GitHub Actions will build binaries for Linux, Windows, and macOS and publish the
 
 ## How it works
 
-1. `pgrep -f eqgame.exe` finds all Wine processes running EQ
-2. Each PID's `/proc/<pid>/cmdline` is checked for `patchme` to skip Wine helper processes
-3. All PIDs are scanned in parallel via `ThreadPoolExecutor` (capped at 16 concurrent X connections)
-4. For each PID: `xdotool search --pid <pid> --onlyvisible` finds the X window
-5. Window titles are parsed with a regex to extract name, server, level, class, zone, and instance
-6. Characters appear in the UI as each PID resolves — no waiting for all scans to finish
-7. PIDs whose window title doesn't match (character is mid-zone) are retried every 2 s for up to 30 s in a background thread, then added when ready
-8. Clicking a button calls `xdotool windowactivate` + `windowraise` + `windowfocus`
+1. A single `wmctrl -lp` call returns every window on the display along with its PID and title — one X client connection, one round-trip
+2. Rows whose titles don't match the EQ format are dropped (zoning windows, gnome panels, etc.)
+3. For surviving PIDs, `/proc/<pid>/cmdline` is read directly to confirm `eqgame.exe patchme` (a file read, not a subprocess) — this filters out the Wine helper process
+4. The result is cached in a `WindowSnapshot` refreshed by a single background thread; the UI reads from cache instantly
+5. Mid-zone characters whose titles haven't matched yet are picked up on the next snapshot tick — no per-PID retry storm
+6. Clicking a button calls `xdotool windowactivate` + `windowraise` + `windowfocus` for that one window only
+
+### Why this matters at high box counts
+
+The earlier implementation spawned `xdotool search` and `xdotool getwindowname` per PID per refresh — at 86 boxes that's 170+ subprocesses, each opening its own X11 client connection. X11 caps at ~256 concurrent clients and Wine already uses ~87 of those, so a refresh storm could push the display server past its limit and take down the desktop session. The current design uses **one** X client per refresh.
 
 ---
 

@@ -113,7 +113,7 @@ class ChooseFontsPlugin:
                     parent=self.font_registry,
                     tag="fntCFPNewFont",
                 )
-                dpg.add_font_range_hint(dpg.mvFontRangeHint_Default, parent="fntCFPNewFont")
+                # dpg.add_font_range_hint(dpg.mvFontRangeHint_Default, parent="fntCFPNewFont")
                 dpg.bind_font(fnt)
                 dpg.set_global_font_scale(self.userScale)
             except Exception as e:
@@ -214,7 +214,7 @@ class ChooseFontsPlugin:
                 parent=self.font_registry,
                 tag="fntCFPNewFont",
             )
-            dpg.add_font_range_hint(dpg.mvFontRangeHint_Default, parent="fntCFPNewFont")
+            # dpg.add_font_range_hint(dpg.mvFontRangeHint_Default, parent="fntCFPNewFont")
             dpg.bind_font(fnt)
             self.userScale = float(dpg.get_value("slideCFPFontScale"))
             dpg.set_global_font_scale(self.userScale)

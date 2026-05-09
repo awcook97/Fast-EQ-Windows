@@ -1,15 +1,10 @@
 import math
 import queue
 import random
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import dearpygui.dearpygui as dpg
 
 from .class_colors import build_class_theme
-from .window_scanner import (
-    EQChar, get_eqgame_pids, scan_pid, scan_pid_retry, MAX_WORKERS, focus_window,
-)
+from .window_scanner import EQChar, WindowSnapshot, focus_window
 from .DearPyGui_EditThemePlugin.EditThemePlugin import EditThemePlugin
 from .DearPyGui_EditThemePlugin.ChooseFontsPlugin import ChooseFontsPlugin
 
@@ -49,13 +44,11 @@ class App:
     def __init__(self) -> None:
         self._characters: list[EQChar] = []
         self._class_themes: dict[str, int] = {}
-        self._auto_refresh = True
-        self._refresh_interval = 3600.0
-        self._last_refresh = 0.0
-        self._scanning = False
         self._result_queue: queue.Queue[list[EQChar]] = queue.Queue()
         self._anon = "Off"
         self._search = ""
+        self._snapshot = WindowSnapshot(refresh_interval=3600.0)
+        self._snapshot.add_listener(self._on_snapshot)
 
     def run(self) -> None:
         dpg.create_context()
@@ -67,10 +60,9 @@ class App:
         dpg.set_primary_window("main_window", True)
         dpg.show_viewport()
 
-        self._refresh()
+        self._snapshot.start()
 
         while dpg.is_dearpygui_running():
-            # Drain all pending scan results; only rebuild once with the latest snapshot
             latest: list[EQChar] | None = None
             while True:
                 try:
@@ -81,18 +73,15 @@ class App:
                 self._characters = latest
                 self._rebuild_table()
 
-            now = time.time()
-            if self._auto_refresh and not self._scanning and (now - self._last_refresh >= self._refresh_interval):
-                self._refresh()
-
             dpg.render_dearpygui_frame()
 
+        self._snapshot.stop()
         dpg.destroy_context()
 
     def _setup_ui(self) -> None:
         with dpg.viewport_menu_bar():
             with dpg.menu(label="File"):
-                dpg.add_menu_item(label="Refresh Now", callback=self._refresh)
+                dpg.add_menu_item(label="Refresh Now", callback=self._on_refresh_clicked)
                 dpg.add_separator()
                 dpg.add_menu_item(label="Quit", callback=dpg.stop_dearpygui)
 
@@ -107,12 +96,12 @@ class App:
         with dpg.window(tag="main_window", label="EQ Window Manager", no_title_bar=True, no_close=True, no_move=True, no_resize=True, no_scrollbar=True):
             dpg.add_spacer(height=22)
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Refresh", callback=self._refresh, height=28)
+                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked, height=28)
                 dpg.add_text("  Auto-refresh:")
                 dpg.add_checkbox(
                     tag="eq_auto_refresh",
                     default_value=True,
-                    callback=lambda s, v: setattr(self, "_auto_refresh", v),
+                    callback=lambda s, v: self._snapshot.set_auto(bool(v)),
                 )
                 dpg.add_text("  Interval (s):")
                 dpg.add_input_float(
@@ -122,7 +111,7 @@ class App:
                     min_value=60.0,
                     max_value=86400.0,
                     step=0,
-                    callback=lambda s, v: setattr(self, "_refresh_interval", float(v)),
+                    callback=lambda s, v: setattr(self._snapshot, "refresh_interval", float(v)),
                 )
                 dpg.add_text("  Anon:")
                 dpg.add_combo(
@@ -158,56 +147,14 @@ class App:
             self._class_themes[eq_class] = build_class_theme(eq_class)
         return self._class_themes[eq_class]
 
-    def _refresh(self) -> None:
-        if self._scanning:
-            return
-        self._scanning = True
-        self._last_refresh = time.time()
+    def _on_refresh_clicked(self) -> None:
         dpg.set_value(_STATUS_TEXT, "   Scanning...")
-        threading.Thread(target=self._scan_worker, daemon=True).start()
+        self._snapshot.request_refresh()
 
-    def _scan_worker(self) -> None:
-        try:
-            pids = get_eqgame_pids()
-            if not pids:
-                self._result_queue.put([])
-                return
-
-            found: list[EQChar] = []
-            unresolved: list[int] = []
-
-            with ThreadPoolExecutor(max_workers=min(len(pids), MAX_WORKERS)) as pool:
-                futures = {pool.submit(scan_pid, pid): pid for pid in pids}
-                for future in as_completed(futures):
-                    char = future.result()
-                    if char:
-                        found.append(char)
-                        self._result_queue.put(list(found))
-                    else:
-                        unresolved.append(futures[future])
-
-            # If nothing was found at all, push an empty list so UI updates
-            if not found:
-                self._result_queue.put([])
-
-            if unresolved:
-                print(f"[scanner] {len(unresolved)} PIDs unresolved (zoning?), retrying in background")
-                threading.Thread(
-                    target=self._retry_zoning,
-                    args=(list(found), unresolved),
-                    daemon=True,
-                ).start()
-        finally:
-            self._scanning = False
-
-    def _retry_zoning(self, found: list[EQChar], unresolved: list[int]) -> None:
-        with ThreadPoolExecutor(max_workers=min(len(unresolved), MAX_WORKERS)) as pool:
-            futures = {pool.submit(scan_pid_retry, pid): pid for pid in unresolved}
-            for future in as_completed(futures):
-                char = future.result()
-                if char:
-                    found.append(char)
-                    self._result_queue.put(list(found))
+    def _on_snapshot(self, chars: list[EQChar]) -> None:
+        # Called on the snapshot worker thread. Hand off to the UI thread
+        # via the queue — DPG calls on a background thread can crash.
+        self._result_queue.put(list(chars))
 
     def _on_anon_change(self, sender, app_data, user_data) -> None:
         self._anon = app_data
