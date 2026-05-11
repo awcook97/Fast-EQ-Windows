@@ -1,0 +1,9 @@
+{
+  "auto_enable": true,
+  "default_settings": {
+    "active": true,
+    "anonymize_names": true,
+    "anonymize_server": true,
+    "server_name": "Norrath"
+  }
+}

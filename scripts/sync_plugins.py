@@ -23,6 +23,7 @@ Or let the post-commit git hook fire it after each commit.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -48,6 +49,80 @@ def target_dir() -> Path:
     if env:
         return Path(env).expanduser()
     return Path.home() / ".config" / "fast_eq_windows" / "plugins"
+
+
+def config_path() -> Path:
+    env = os.environ.get("FAST_EQ_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".config" / "fast_eq_windows" / "plugins.json"
+
+
+def _load_user_config(path: Path) -> dict:
+    if not path.exists():
+        return {"enabled": [], "settings": {}}
+    try:
+        data = json.loads(path.read_text())
+    except Exception as exc:
+        print(f"  ! could not parse {path}: {exc}; starting fresh")
+        return {"enabled": [], "settings": {}}
+    data.setdefault("enabled", [])
+    data.setdefault("settings", {})
+    return data
+
+
+def _save_user_config(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _read_manifest(plugin_src: Path) -> dict:
+    """Return manifest dict, or empty dict if none."""
+    mf = plugin_src / "manifest.json"
+    if not mf.exists():
+        return {}
+    try:
+        return json.loads(mf.read_text())
+    except Exception as exc:
+        print(f"  ! {plugin_src.name}/manifest.json invalid ({exc}); ignoring")
+        return {}
+
+
+def _merge_manifest(
+    user_cfg: dict, plugin_name: str, manifest: dict,
+) -> tuple[bool, list[str]]:
+    """Apply manifest defaults to user_cfg, never clobbering existing values.
+
+    Returns (changed, log_lines).
+    """
+    changed = False
+    log: list[str] = []
+
+    # Auto-enable if requested and not already disabled-by-user.  Once a
+    # plugin appears in either ``enabled`` or the new ``disabled`` list, we
+    # never touch its enabled-state on subsequent syncs.
+    enabled = user_cfg.setdefault("enabled", [])
+    disabled = user_cfg.setdefault("disabled", [])
+    seen = plugin_name in enabled or plugin_name in disabled
+    if manifest.get("auto_enable", False) and not seen:
+        enabled.append(plugin_name)
+        changed = True
+        log.append("auto-enabled")
+
+    # Merge default settings (only fill missing keys).
+    defaults = manifest.get("default_settings") or {}
+    if defaults:
+        ns = user_cfg.setdefault("settings", {}).setdefault(plugin_name, {})
+        added = []
+        for k, v in defaults.items():
+            if k not in ns:
+                ns[k] = v
+                added.append(k)
+        if added:
+            changed = True
+            log.append(f"defaults: {', '.join(added)}")
+
+    return changed, log
 
 
 def _is_plugin_folder(p: Path) -> bool:
@@ -119,16 +194,31 @@ def main() -> int:
         print("  (nothing to sync)")
         return 0
 
+    cfg_path = config_path()
+    user_cfg = _load_user_config(cfg_path)
+    cfg_changed = False
+
     for src in plugins:
         print(f"  ↪ {src.name}  (from {src.parent.name}/)")
         dst = _copy_plugin(src, dst_root)
         _install_requirements(dst)
+
+        manifest = _read_manifest(src)
+        if manifest:
+            changed, notes = _merge_manifest(user_cfg, src.name, manifest)
+            for note in notes:
+                print(f"     • {note}")
+            cfg_changed = cfg_changed or changed
 
     if libs:
         libs_root.mkdir(parents=True, exist_ok=True)
         for src in libs:
             print(f"  ↪ _libs/{src.name}  (from {src.parent.name}/)")
             _copy_plugin(src, libs_root)
+
+    if cfg_changed:
+        _save_user_config(cfg_path, user_cfg)
+        print(f"  ✎ updated {cfg_path}")
 
     print(f"Done. {len(plugins)} plugin(s), {len(libs)} lib(s) synced.")
     return 0

@@ -44,14 +44,29 @@ Install one plugin per folder:
       plugins/
         my_plugin/
           plugin.py
+          manifest.json   (optional)
       plugins.json
 
-Enable a plugin by adding its folder name to `~/.config/fast_eq_windows/plugins.json`:
+## Enabling
+
+The recommended way is to ship a `manifest.json` alongside `plugin.py`:
 
     {
-      "enabled": ["my_plugin"],
-      "settings": {}
+      "auto_enable": true,
+      "default_settings": { "active": true }
     }
+
+When you run `scripts/sync_plugins.py` (or commit, via the post-commit hook),
+the script will:
+
+- Add the plugin to `plugins.json -> enabled` the first time it sees it.
+- Fill in any missing keys under `plugins.json -> settings -> <plugin>` from
+  `default_settings`.  Values you've already set are never overwritten.
+- Skip plugins you've moved into `plugins.json -> disabled`, so a sync never
+  re-enables a plugin you turned off.
+
+You can also enable a plugin by hand: edit `plugins.json` and add the folder
+name to the `enabled` array.
 
 `plugin.py` must define exactly one class that derives from
 `fast_eq_windows.core.plugin.Plugin`.  Copy `_template/plugin.py` as a starter.

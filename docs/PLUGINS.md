@@ -40,14 +40,39 @@ beside real plugins.
 
 ## Enabling plugins
 
-Edit `~/.config/fast_eq_windows/plugins.json`:
+Two ways:
 
-```json
-{
-  "enabled": ["my_plugin"],
-  "settings": {}
-}
-```
+1. **Manifest (recommended for shipped plugins)** — drop a `manifest.json`
+   next to `plugin.py`. The repo's `scripts/sync_plugins.py` reads it on each
+   sync and updates the user's `plugins.json` (without ever clobbering values
+   the user has already set).
+
+   ```json
+   {
+     "auto_enable": true,
+     "default_settings": {
+       "active": true,
+       "anonymize_names": true
+     }
+   }
+   ```
+
+   - `auto_enable` adds the plugin to `enabled` *only the first time* — once
+     a user moves the entry to `disabled` (or removes it manually) sync
+     leaves their choice alone.
+   - `default_settings` keys are filled in only when missing, so user edits
+     always win.
+
+2. **Manual edit** — open `~/.config/fast_eq_windows/plugins.json` and add
+   the plugin folder name to the `enabled` array:
+
+   ```json
+   {
+     "enabled": ["my_plugin"],
+     "disabled": [],
+     "settings": {}
+   }
+   ```
 
 Restart the app or choose **Plugins → Reload**.
 

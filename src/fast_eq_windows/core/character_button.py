@@ -50,6 +50,7 @@ class CharacterButton:
         self._display_server = display_server
         self._tooltip_text = tooltip_text
         self._theme_id: DpgId = theme_id
+        self._original_theme_id: DpgId = theme_id
         self._scheduler = scheduler
         self._flash_handle: Any = None
         # Themes built by set_colors()/flash() that this button owns and must
@@ -60,6 +61,8 @@ class CharacterButton:
         # assignment: first kind is slot 0, second kind is slot 1, etc.
         self._bars: dict[str, tuple[float, tuple[int, int, int, int]]] = {}
         self._badge: tuple[str | None, tuple[int, int, int, int] | None] = (None, None)
+        self._caption: tuple[str | None, tuple[int, int, int, int] | None] = (None, None)
+        self._fill_depletion: tuple[float, tuple[int, int, int, int]] | None = None
         self._dim: float = 0.0
         self._meta: dict[str, Any] = {}
         self._base_bg: tuple[int, int, int, int] | None = None
@@ -135,6 +138,23 @@ class CharacterButton:
 
         dpg.delete_item(self._drawlist_id, children_only=True)
 
+        # Full-button depletion mask (e.g. HP "full bar" mode).  Drawn first
+        # so other overlays sit on top.  We darken the right (1-pct) slice of
+        # the button so the underlying class color shows through the left
+        # (filled) portion.
+        if self._fill_depletion is not None:
+            pct, color = self._fill_depletion
+            pct = max(0.0, min(1.0, pct))
+            x_split = int(self._width * pct)
+            if x_split < self._width:
+                dpg.draw_rectangle(
+                    (x_split, 0),
+                    (self._width, self._height),
+                    color=color,
+                    fill=color,
+                    parent=self._drawlist_id,
+                )
+
         # Slot-based overlay bars.  Each plugin supplies a kind; the button
         # owns placement and stacks bars in insertion order from the top down.
         bar_h = 5
@@ -194,6 +214,17 @@ class CharacterButton:
                 parent=self._drawlist_id,
             )
 
+        caption_text, caption_color = self._caption
+        if caption_text:
+            text_color = caption_color or (255, 255, 255, 230)
+            dpg.draw_text(
+                (3, max(0, self._height - 14)),
+                caption_text,
+                color=text_color,
+                size=12,
+                parent=self._drawlist_id,
+            )
+
     def _tick(self, dt: float) -> None:
         """Reserved for per-frame work driven by the host scheduler.
 
@@ -235,6 +266,20 @@ class CharacterButton:
         self._base_bg = None
         self._base_fg = None
         self._apply_theme(theme_id)
+
+    def reset_theme(self) -> None:
+        """Revert to the class theme bound at construction time.
+
+        Plugins that call ``set_colors`` (which builds and binds a fresh
+        theme) should call this when they're done so the button returns to
+        its original class color.
+        """
+        prev_owned = self._theme_id if self._theme_id in self._owned_themes else None
+        self._base_bg = None
+        self._base_fg = None
+        self._apply_theme(self._original_theme_id)
+        if prev_owned is not None:
+            self._discard_owned_theme(prev_owned)
 
     def set_colors(
         self,
@@ -284,6 +329,32 @@ class CharacterButton:
     def set_dim(self, amount: float) -> None:
         """Dim the button by blending toward black (0 = normal, 1 = black)."""
         self._dim = max(0.0, min(1.0, amount))
+        self._rebuild_overlay()
+
+    def set_fill_depletion(
+        self,
+        pct: float | None,
+        color_rgba: tuple[int, int, int, int] = (0, 0, 0, 200),
+    ) -> None:
+        """Darken the right (1-pct) of the button to fake a full-button bar.
+
+        Pass ``pct=None`` to clear.  The button's base color (set via
+        ``set_colors`` / class theme) shows through the un-darkened left
+        slice, producing an EverQuest-style depleting fill.
+        """
+        if pct is None:
+            self._fill_depletion = None
+        else:
+            self._fill_depletion = (max(0.0, min(1.0, pct)), color_rgba)
+        self._rebuild_overlay()
+
+    def set_caption(
+        self,
+        text: str | None,
+        color_rgba: tuple[int, int, int, int] | None = None,
+    ) -> None:
+        """Set bottom-left caption text (e.g. platinum). Pass None to clear."""
+        self._caption = (text, color_rgba)
         self._rebuild_overlay()
 
     def set_meta(self, key: str, value: Any) -> None:

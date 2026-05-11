@@ -38,10 +38,17 @@ class AnonymousServerPlugin(Plugin):
         self.ctx = ctx
         self.server_name = str(ctx.settings.get("server_name", "Norrath"))
         self.active = bool(ctx.settings.get("active", True))
+        self.anon_names = bool(ctx.settings.get("anonymize_names", True))
+        self.anon_server = bool(ctx.settings.get("anonymize_server", True))
         self._last_servers: list[str] = []
-        self._menu_id = ctx.register_menu("Anonymous Server: Toggle", self._toggle)
+        ctx.register_menu("Anonymous Server: Toggle", self._toggle)
+        ctx.register_menu("Anonymous Server: Settings...", self._open_settings)
         self._apply_all()
-        ctx.log(f"loaded ({'active' if self.active else 'inactive'}, server={self.server_name!r})")
+        ctx.log(
+            f"loaded ({'active' if self.active else 'inactive'}, "
+            f"names={self.anon_names}, server={self.anon_server}, "
+            f"server_name={self.server_name!r})"
+        )
 
     def on_unload(self) -> None:
         self._restore_all()
@@ -65,13 +72,76 @@ class AnonymousServerPlugin(Plugin):
             self._restore_all()
         self.ctx.log("active" if self.active else "inactive")
 
+    def _open_settings(self, *_: Any) -> None:
+        tag = "anonymous_server_settings_window"
+        if dpg.does_item_exist(tag):
+            dpg.focus_item(tag)
+            return
+        with dpg.window(
+            label="Anonymous Server — Settings",
+            tag=tag,
+            width=320,
+            height=200,
+            no_collapse=True,
+            on_close=lambda: dpg.delete_item(tag) if dpg.does_item_exist(tag) else None,
+        ):
+            dpg.add_checkbox(
+                label="Active",
+                default_value=self.active,
+                callback=lambda *_a: self._toggle(),
+            )
+            dpg.add_separator()
+            dpg.add_checkbox(
+                label="Anonymize names",
+                default_value=self.anon_names,
+                callback=self._on_names_toggle,
+            )
+            dpg.add_checkbox(
+                label="Anonymize server",
+                default_value=self.anon_server,
+                callback=self._on_server_toggle,
+            )
+            dpg.add_input_text(
+                label="Replacement server name",
+                default_value=self.server_name,
+                width=160,
+                callback=self._on_server_name,
+                on_enter=True,
+            )
+
+    def _on_names_toggle(self, sender: Any, value: bool, *_: Any) -> None:
+        self.anon_names = bool(value)
+        self.ctx.settings.set("anonymize_names", self.anon_names)
+        self.ctx.settings.save()
+        if self.active:
+            self._apply_all()
+
+    def _on_server_toggle(self, sender: Any, value: bool, *_: Any) -> None:
+        self.anon_server = bool(value)
+        self.ctx.settings.set("anonymize_server", self.anon_server)
+        self.ctx.settings.save()
+        if self.active:
+            self._apply_all()
+
+    def _on_server_name(self, sender: Any, value: str, *_: Any) -> None:
+        # Restore old labels first so the next apply targets fresh row text.
+        self._restore_server_row_labels()
+        self.server_name = str(value) or "Norrath"
+        self.ctx.settings.set("server_name", self.server_name)
+        self.ctx.settings.save()
+        if self.active:
+            self._apply_all()
+
     def _apply_all(self) -> None:
         if not self.active:
             return
         self._last_servers = sorted({c.group_row for c in self.ctx.characters()})
         for button in self.ctx.buttons.all():
             self._apply_button(button)
-        self._set_server_row_labels(self.server_name)
+        if self.anon_server:
+            self._set_server_row_labels(self.server_name)
+        else:
+            self._restore_server_row_labels()
 
     def _restore_all(self) -> None:
         for button in self.ctx.buttons.all():
@@ -80,10 +150,11 @@ class AnonymousServerPlugin(Plugin):
 
     def _apply_button(self, button: Any) -> None:
         char = button.char
-        anon = _anon_name(char.window_id)
+        anon = _anon_name(char.window_id) if self.anon_names else char.display_name
+        server = self.server_name if self.anon_server else char.group_row
         button.set_label(anon)
-        button.set_tooltip(self._tooltip_for(char, anon, self.server_name))
-        button.set_meta("anonymous_server.anon_name", anon)
+        button.set_tooltip(self._tooltip_for(char, anon, server))
+        button.set_meta("anonymous_server.anon_name", anon if self.anon_names else None)
 
     def _restore_button(self, button: Any) -> None:
         char = button.char
