@@ -10,6 +10,7 @@ and an empty `plugins.json` if any are missing.  Existing user files are not
 overwritten; only known stale auto-generated stubs are upgraded in place.
 """
 import os
+import sys
 from pathlib import Path
 
 
@@ -221,3 +222,12 @@ def bootstrap() -> None:
     if not config.exists():
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(_CONFIG_STUB)
+
+    # Make ``<plugins>/_libs/`` importable so private/synced plugins can do
+    # ``import pyEQLib`` etc. without bundling the library inside their own
+    # plugin folder.  scripts/sync_plugins.py populates this directory.
+    libs_dir = plugins_dir / "_libs"
+    if libs_dir.is_dir():
+        libs_str = str(libs_dir)
+        if libs_str not in sys.path:
+            sys.path.insert(0, libs_str)

@@ -84,6 +84,8 @@ class App:
             lambda name, payload: self._plugin_host.dispatch("on_event", name, payload)
         )
         self._last_tick: float = 0.0
+        self._host_settings = self._settings.namespace("_host")
+        self._fps_cap: float = float(self._host_settings.get("fps_cap", 30.0))
 
     def run(self) -> None:
         dpg.create_context()
@@ -101,6 +103,7 @@ class App:
         self._last_tick = time.monotonic()
 
         while dpg.is_dearpygui_running():
+            frame_start = time.monotonic()
             latest: list[Character] | None = None
             while True:
                 try:
@@ -120,6 +123,14 @@ class App:
             self._plugin_host.dispatch("on_tick", dt)
 
             dpg.render_dearpygui_frame()
+
+            # Cap framerate: idle the rest of the frame budget so we don't
+            # burn CPU rendering at 200+ FPS for a button grid.
+            if self._fps_cap > 0:
+                budget = 1.0 / self._fps_cap
+                elapsed = time.monotonic() - frame_start
+                if elapsed < budget:
+                    time.sleep(budget - elapsed)
 
         self._events.publish("app.shutdown", {})
         self._plugin_host.unload_all()
@@ -265,6 +276,16 @@ class App:
                     hint="filter by name",
                     callback=self._on_search_change,
                 )
+                dpg.add_text("  FPS cap:")
+                dpg.add_input_float(
+                    tag="eq_fps_cap",
+                    default_value=self._fps_cap,
+                    width=70,
+                    min_value=0.0,
+                    max_value=240.0,
+                    step=0,
+                    callback=self._on_fps_change,
+                )
                 dpg.add_text("", tag=_STATUS_TEXT)
 
             dpg.add_separator()
@@ -304,6 +325,11 @@ class App:
     def _on_search_change(self, sender, app_data, user_data) -> None:
         self._search = app_data.strip().lower()
         self._rebuild_table()
+
+    def _on_fps_change(self, sender, app_data, user_data) -> None:
+        cap = max(0.0, float(app_data))
+        self._fps_cap = cap
+        self._host_settings.set("fps_cap", cap)
 
     def _display_name(self, char: Character) -> str:
         if self._anon != "Off":

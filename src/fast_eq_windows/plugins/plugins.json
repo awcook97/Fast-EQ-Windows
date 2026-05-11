@@ -1,0 +1,11 @@
+{
+  "enabled": [
+    "anonymous_server"
+  ],
+  "settings": {
+    "anonymous_server": {
+      "active": true,
+      "server_name": "Norrath"
+    }
+  }
+}

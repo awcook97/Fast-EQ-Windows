@@ -19,6 +19,7 @@ class EQChar:
     zone: str
     instance: int
     window_id: int
+    pid: int = 0
 
     # Character protocol attributes — derived from existing fields so
     # _parse_title construction doesn't need to change.
@@ -50,6 +51,7 @@ class EQChar:
             "zone": self.zone,
             "instance": self.instance,
             "eq_class": self.eq_class,
+            "pid": self.pid,
         }
 
 
@@ -110,6 +112,7 @@ def scan_windows() -> list[EQChar]:
             continue
         if not _is_eq_pid(pid):
             continue
+        char.pid = pid
         chars.append(char)
     return chars
 

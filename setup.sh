@@ -51,6 +51,13 @@ exec uv run fast-eq-windows "\$@"
 EOF
 chmod +x "$PROJ_DIR/fast-eq-windows-debug.sh"
 
+# ── Git hooks + initial plugin sync ──────────────────────────────────────────
+if [ -d "$PROJ_DIR/.git" ]; then
+    git -C "$PROJ_DIR" config core.hooksPath .githooks
+    echo "  git hooks → .githooks/"
+fi
+uv run python "$PROJ_DIR/scripts/sync_plugins.py" || true
+
 echo ""
 echo "=== Done ==="
 echo ""
